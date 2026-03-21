@@ -55,6 +55,7 @@ class AppState: ObservableObject {
             }
         )
 
+        requestAccessibility()
     }
 
     var isReady: Bool { status == .ready }
