@@ -2,12 +2,28 @@
 
 ## Python Environment
 - **Always use `uv`** instead of `pip` or `pip3`
-- **Always use a virtual environment (`venv`)** — never install packages globally
-- Standard setup for any Python work in this project:
-  ```bash
-  uv venv .venv
-  source .venv/bin/activate
-  uv pip install -r requirements.txt
-  ```
-- Never use `--break-system-packages`
-- Never use bare `pip install` or `pip3 install`
+- **Always use a virtual environment** — never install packages globally
+- This project uses `pyproject.toml` (not `requirements.txt`)
+
+### Fresh clone setup
+```bash
+uv sync        # creates .venv and installs all dependencies
+```
+
+### Adding a new package
+```bash
+uv add <package>
+```
+
+### Running scripts
+```bash
+uv run python server/server.py
+# or activate the venv first:
+source .venv/bin/activate
+```
+
+### Never use
+- `pip install` or `pip3 install`
+- `--break-system-packages`
+- `uv pip install` (use `uv add` instead)
+- manual `uv venv` + `uv pip install` (use `uv sync`)
