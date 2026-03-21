@@ -11,6 +11,12 @@ enum AppStatus: Equatable {
     case error(String)
 }
 
+/// Tracks how the current recording was triggered.
+private enum RecordingMode {
+    case markdown   // ⌘⇧T: Whisper → Claude → .md file → Finder
+    case paste      // Fn:   Whisper only → clipboard + auto-paste
+}
+
 @MainActor
 class AppState: ObservableObject {
     @Published var status: AppStatus = .starting
@@ -24,26 +30,24 @@ class AppState: ObservableObject {
 
     var whisperModel: String = "mlx-community/whisper-large-v3-turbo"
 
-    /// API key stored in UserDefaults.
-    /// Set once from Terminal: defaults write com.sumitrk.transcribe-meeting anthropicApiKey "sk-ant-..."
-    /// The Settings window (step 6) will let you set it via UI instead.
     var anthropicApiKey: String {
         UserDefaults.standard.string(forKey: "anthropicApiKey") ?? ""
     }
 
     private var recordingStartedAt: Date?
+    private var currentMode: RecordingMode = .markdown
 
     init() {
         Task { await startServer() }
 
-        // ⌘⇧T — toggle recording
-        hotkey.start { [weak self] in self?.toggleRecording() }
+        // ⌘⇧T — toggle: full markdown pipeline
+        hotkey.start { [weak self] in self?.toggleMarkdown() }
 
-        // Fn (hold) — push-to-talk: start on press, stop on release
+        // Fn (hold) — push-to-talk: paste only, no markdown
         hotkey.startPushToTalk(
             onPress: { [weak self] in
                 guard let self, !self.isRecording else { return }
-                Task { await self.startRecording() }
+                Task { await self.startRecording(mode: .paste) }
             },
             onRelease: { [weak self] in
                 guard let self, self.isRecording else { return }
@@ -51,8 +55,6 @@ class AppState: ObservableObject {
             }
         )
 
-        // Request Accessibility permission so we can auto-paste after transcription.
-        // Without it we fall back to clipboard-only.
         requestAccessibilityIfNeeded()
     }
 
@@ -61,30 +63,38 @@ class AppState: ObservableObject {
     var statusLabel: String {
         switch status {
         case .starting:      return "Starting server…"
-        case .ready:         return "Ready  (⌘⇧T or hold Fn)"
-        case .recording:     return "Recording…  (⌘⇧T or release Fn)"
+        case .ready:         return "Ready  (⌘⇧T to record | hold Fn to dictate)"
+        case .recording:
+            return currentMode == .paste
+                ? "Dictating…  (release Fn to stop)"
+                : "Recording…  (⌘⇧T to stop)"
         case .transcribing:  return "Transcribing…"
         case .summarising:   return "Summarising…"
         case .error(let m):  return "Error: \(m)"
         }
     }
 
-    // MARK: - Recording
+    // MARK: - Toggle (⌘⇧T)
 
-    func toggleRecording() {
-        if isRecording {
+    func toggleMarkdown() {
+        if isRecording && currentMode == .markdown {
             Task { await stopRecording() }
-        } else {
-            Task { await startRecording() }
+        } else if !isRecording {
+            Task { await startRecording(mode: .markdown) }
         }
+        // ignore ⌘⇧T while in PTT mode
     }
 
-    func startRecording() async {
+    // MARK: - Recording core
+
+    func startRecording(mode: RecordingMode) async {
         do {
+            currentMode = mode
             try await recorder.startRecording()
             isRecording = true
             status = .recording
             recordingStartedAt = Date()
+            playSound("Tink")  // start cue
         } catch {
             status = .error(error.localizedDescription)
         }
@@ -92,52 +102,56 @@ class AppState: ObservableObject {
 
     func stopRecording() async {
         let startedAt = recordingStartedAt ?? Date()
+        let mode = currentMode
         isRecording = false
         status = .transcribing
+        playSound("Pop")  // stop cue — immediate feedback before transcription
 
         do {
-            // 1. Stop capture → WAV file
             let wavURL = try await recorder.stopRecording()
             print("WAV saved: \(wavURL.path)")
 
-            // 2. Whisper transcription
             let rawTranscript = try await client.transcribe(wavURL: wavURL, model: whisperModel)
             print("Transcript ready (\(rawTranscript.count) chars)")
 
-            let duration = Int(Date().timeIntervalSince(startedAt) / 60)
-            let mdURL = wavURL.deletingPathExtension().appendingPathExtension("md")
+            switch mode {
 
-            // 3. Claude summarisation (skipped gracefully if no API key)
-            let pasteText: String  // what goes into clipboard / gets pasted
-            let md: String
-            if anthropicApiKey.isEmpty {
-                print("No API key — skipping summarisation")
-                pasteText = rawTranscript
-                md = buildMarkdown(date: startedAt, duration: duration,
-                                   cleanedTranscript: rawTranscript, summary: nil)
-            } else {
-                status = .summarising
-                let result = try await client.summarise(transcript: rawTranscript,
-                                                        apiKey: anthropicApiKey)
-                print("Summary ready")
-                pasteText = result.cleaned_transcript
-                md = buildMarkdown(date: startedAt, duration: duration,
-                                   cleanedTranscript: result.cleaned_transcript,
-                                   summary: result.summary)
+            case .paste:
+                // PTT: just paste the raw transcript, no markdown file
+                status = .ready
+                copyAndPaste(rawTranscript)
+                // Delete the WAV — nothing to keep
+                try? FileManager.default.removeItem(at: wavURL)
+
+            case .markdown:
+                // Toggle: full pipeline — Claude → .md → Finder
+                let duration = Int(Date().timeIntervalSince(startedAt) / 60)
+                let mdURL = wavURL.deletingPathExtension().appendingPathExtension("md")
+
+                let md: String
+                if anthropicApiKey.isEmpty {
+                    print("No API key — skipping summarisation")
+                    md = buildMarkdown(date: startedAt, duration: duration,
+                                       cleanedTranscript: rawTranscript, summary: nil)
+                } else {
+                    status = .summarising
+                    let result = try await client.summarise(transcript: rawTranscript,
+                                                            apiKey: anthropicApiKey)
+                    print("Summary ready")
+                    md = buildMarkdown(date: startedAt, duration: duration,
+                                       cleanedTranscript: result.cleaned_transcript,
+                                       summary: result.summary)
+                }
+
+                try md.write(to: mdURL, atomically: true, encoding: .utf8)
+                print("Saved: \(mdURL.path)")
+
+                lastMeetingPath = mdURL.path
+                status = .ready
+                playSound("Glass")  // done cue
+
+                NSWorkspace.shared.selectFile(mdURL.path, inFileViewerRootedAtPath: "")
             }
-
-            // 4. Write markdown file
-            try md.write(to: mdURL, atomically: true, encoding: .utf8)
-            print("Saved: \(mdURL.path)")
-
-            lastMeetingPath = mdURL.path
-            status = .ready
-
-            // 5. Copy transcript to clipboard + auto-paste into active input
-            copyAndPaste(pasteText)
-
-            // 6. Reveal in Finder
-            NSWorkspace.shared.selectFile(mdURL.path, inFileViewerRootedAtPath: "")
 
         } catch {
             isRecording = false
@@ -146,27 +160,24 @@ class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Sound
+
+    private func playSound(_ name: String) {
+        NSSound(named: name)?.play()
+    }
+
     // MARK: - Clipboard + paste
 
-    /// Copies `text` to the system clipboard, then simulates ⌘V to paste it
-    /// into whatever app/input is currently focused.
-    ///
-    /// Auto-paste requires Accessibility permission. If it hasn't been granted,
-    /// the text is still on the clipboard so the user can paste manually.
     private func copyAndPaste(_ text: String) {
-        // Always copy to clipboard — no permission needed
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         print("Copied to clipboard (\(text.count) chars)")
 
         guard AXIsProcessTrusted() else {
-            print("Accessibility not granted — clipboard only (grant in System Settings > Privacy & Security > Accessibility)")
+            print("Accessibility not granted — clipboard only")
             return
         }
 
-        // Simulate ⌘V into the currently focused app.
-        // Our app is LSUIElement (no dock icon, never steals focus), so the
-        // user's active window/input field remains focused throughout recording.
         let src  = CGEventSource(stateID: .hidSystemState)
         let down = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: true)
         let up   = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: false)
@@ -181,7 +192,6 @@ class AppState: ObservableObject {
 
     private func requestAccessibilityIfNeeded() {
         guard !AXIsProcessTrusted() else { return }
-        // Shows the system prompt directing the user to System Settings > Accessibility
         let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
         AXIsProcessTrustedWithOptions(opts)
     }
@@ -194,18 +204,8 @@ class AppState: ObservableObject {
             "# Meeting — \(formattedDate(date))",
             "**Duration:** ~\(max(1, duration)) min  |  **Model:** \(whisperModel)",
         ]
-
-        if let summary {
-            sections += ["", summary]
-        }
-
-        sections += [
-            "",
-            "## Transcript",
-            "",
-            cleanedTranscript,
-        ]
-
+        if let summary { sections += ["", summary] }
+        sections += ["", "## Transcript", "", cleanedTranscript]
         return sections.joined(separator: "\n")
     }
 
