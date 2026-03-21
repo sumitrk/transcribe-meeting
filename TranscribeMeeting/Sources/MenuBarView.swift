@@ -10,10 +10,11 @@ struct MenuBarView: View {
 
         Divider()
 
-        // Start / Stop recording
+        // Start / Stop recording  (also triggered by ⌘⇧T globally)
         Button(appState.isRecording ? "Stop Recording" : "Start Recording") {
             appState.toggleRecording()
         }
+        .keyboardShortcut("t", modifiers: [.command, .shift])
         .disabled(!appState.isReady && !appState.isRecording)
 
         Divider()
