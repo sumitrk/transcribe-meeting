@@ -32,6 +32,18 @@ struct MenuBarView: View {
 
         Divider()
 
+        // Auto-paste status — tap to grant Accessibility if not yet enabled
+        if appState.canAutoPaste {
+            Text("Auto-Paste: Enabled")
+                .foregroundStyle(.secondary)
+        } else {
+            Button("Enable Auto-Paste…") {
+                appState.requestAccessibility()
+            }
+        }
+
+        Divider()
+
         Button("Settings…") {
             // TODO: Step 6 — open settings window
             NSApp.activate(ignoringOtherApps: true)

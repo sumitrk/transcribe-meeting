@@ -105,7 +105,6 @@ class AppState: ObservableObject {
         let mode = currentMode
         isRecording = false
         status = .transcribing
-        playSound("Pop")  // stop cue — immediate feedback before transcription
 
         do {
             let wavURL = try await recorder.stopRecording()
@@ -119,6 +118,7 @@ class AppState: ObservableObject {
             case .paste:
                 // PTT: just paste the raw transcript, no markdown file
                 status = .ready
+                playSound("Glass")  // done cue — transcription complete
                 copyAndPaste(rawTranscript)
                 // Delete the WAV — nothing to keep
                 try? FileManager.default.removeItem(at: wavURL)
@@ -190,8 +190,15 @@ class AppState: ObservableObject {
 
     // MARK: - Accessibility
 
+    var canAutoPaste: Bool { AXIsProcessTrusted() }
+
     private func requestAccessibilityIfNeeded() {
         guard !AXIsProcessTrusted() else { return }
+        let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
+        AXIsProcessTrustedWithOptions(opts)
+    }
+
+    func requestAccessibility() {
         let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
         AXIsProcessTrustedWithOptions(opts)
     }
