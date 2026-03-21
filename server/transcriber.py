@@ -24,7 +24,9 @@ def transcribe_chunks(chunk_paths: list[Path], model: str) -> str:
 
     if not _model_is_cached(model):
         print(f"First run: downloading Whisper model '{model}'...", flush=True)
-        size_hint = "~3 GB for large-v3" if "large" in model else "~150 MB for small"
+        size_hint = "~809 MB for large-v3-turbo" if "turbo" in model else (
+            "~3 GB for large-v3" if "large" in model else "~150 MB for small"
+        )
         print(f"This may take a few minutes ({size_hint}).", flush=True)
 
     total = len(chunk_paths)

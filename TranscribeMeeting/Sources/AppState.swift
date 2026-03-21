@@ -1,4 +1,8 @@
+import AppKit
+import AVFoundation
+import CoreGraphics
 import Foundation
+import ScreenCaptureKit
 
 enum AppStatus: Equatable {
     case starting
@@ -23,6 +27,7 @@ class AppState: ObservableObject {
 
     init() {
         Task {
+            await requestPermissions()
             await startServer()
         }
     }
@@ -64,21 +69,77 @@ class AppState: ObservableObject {
 
     private func stopRecording() async {
         let startedAt = recordingStartedAt ?? Date()
+        isRecording = false
+        status = .processing
+
         do {
             let wavURL = try await recorder.stopRecording()
-            isRecording = false
+            print("WAV saved: \(wavURL.path)")
+
+            status = .processing
+            let transcript = try await client.transcribe(wavURL: wavURL, model: whisperModel)
+            print("Transcript ready (\(transcript.count) chars)")
+
+            // Save transcript as markdown in meetings/ folder alongside the WAV
+            let mdURL = wavURL.deletingPathExtension().appendingPathExtension("md")
+            let duration = Int(Date().timeIntervalSince(startedAt) / 60)
+            let md = """
+            # Meeting — \(formattedDate(startedAt))
+            **Duration:** ~\(max(1, duration)) min
+            **Model:** \(whisperModel)
+
+            ## Transcript
+
+            \(transcript)
+            """
+            try md.write(to: mdURL, atomically: true, encoding: .utf8)
+            print("Transcript saved: \(mdURL.path)")
+
+            lastMeetingPath = mdURL.path
             status = .ready
 
-            // Debug: transcribe and print to console (full pipeline wired in Step 4)
-            print("WAV saved: \(wavURL.path)")
-            let transcript = try await client.transcribe(wavURL: wavURL, model: whisperModel)
-            print("Transcript: \(transcript)")
-            let duration = Int(Date().timeIntervalSince(startedAt) / 60)
-            print("Duration: ~\(max(1, duration)) min")
+            // Open the meetings folder in Finder for easy access
+            NSWorkspace.shared.selectFile(mdURL.path, inFileViewerRootedAtPath: "")
+
         } catch {
             isRecording = false
             status = .error(error.localizedDescription)
             print("Recording error: \(error.localizedDescription)")
+        }
+    }
+
+    private func formattedDate(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f.string(from: date)
+    }
+
+    // MARK: - Permissions
+
+    private func requestPermissions() async {
+        // Screen capture — triggers the system "Allow screen recording?" dialog if not yet granted.
+        // CGRequestScreenCaptureAccess() is a blocking call so we hop off the main actor briefly.
+        let hasScreen = await Task.detached(priority: .userInitiated) {
+            CGRequestScreenCaptureAccess()
+        }.value
+
+        if !hasScreen {
+            status = .error("Screen recording permission denied. Enable it in System Settings → Privacy → Screen & System Audio Recording, then relaunch.")
+            return
+        }
+
+        // Microphone — AVAudioEngine will surface its own prompt, but we pre-check here
+        // so the status reflects any denial early.
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            break
+        case .notDetermined:
+            _ = await AVCaptureDevice.requestAccess(for: .audio)
+        case .denied, .restricted:
+            status = .error("Microphone permission denied. Enable it in System Settings → Privacy → Microphone, then relaunch.")
+        @unknown default:
+            break
         }
     }
 

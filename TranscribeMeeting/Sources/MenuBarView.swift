@@ -26,14 +26,7 @@ struct MenuBarView: View {
         }
 
         Button("Open Meetings Folder") {
-            let folder = FileManager.default
-                .urls(for: .documentDirectory, in: .userDomainMask)
-                .first!
-                .appendingPathComponent("Meetings")
-            // Create folder if it doesn't exist yet
-            try? FileManager.default.createDirectory(at: folder,
-                                                     withIntermediateDirectories: true)
-            NSWorkspace.shared.open(folder)
+            NSWorkspace.shared.open(AudioRecorder.meetingsFolder())
         }
 
         Divider()

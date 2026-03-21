@@ -31,6 +31,13 @@ class PythonServer {
         proc.currentDirectoryURL = URL(fileURLWithPath: serverScript)
             .deletingLastPathComponent()
 
+        // Ensure Homebrew and system tools (ffmpeg, etc.) are on PATH.
+        // macOS apps launched from Xcode get a stripped environment that excludes /opt/homebrew/bin.
+        var env = ProcessInfo.processInfo.environment
+        let extraPaths = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = extraPaths + ":" + (env["PATH"] ?? "")
+        proc.environment = env
+
         // Log to file instead of /dev/null so we can debug startup errors
         // tail -f /tmp/transcribemeeting-server.log
         FileManager.default.createFile(atPath: logPath, contents: nil)

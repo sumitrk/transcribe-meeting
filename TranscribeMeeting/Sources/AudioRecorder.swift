@@ -1,8 +1,11 @@
-import AVFoundation
+@preconcurrency import AVFoundation
+import CoreMedia
 import ScreenCaptureKit
 import Foundation
 
-@MainActor
+// AudioRecorder is NOT @MainActor so that nonisolated SCStreamOutput callbacks
+// can safely touch the sample buffers (protected only by NSLock).
+// Public methods that mutate @Published state are individually @MainActor.
 class AudioRecorder: NSObject, ObservableObject {
 
     // MARK: - State
@@ -14,6 +17,7 @@ class AudioRecorder: NSObject, ObservableObject {
     private var scStream: SCStream?
     private var micEngine: AVAudioEngine?
 
+    /// Both arrays are accessed from background threads; always hold `lock`.
     private var systemAudioSamples: [Float] = []
     private var micSamples: [Float] = []
     private let lock = NSLock()
@@ -22,9 +26,13 @@ class AudioRecorder: NSObject, ObservableObject {
 
     // MARK: - Public API
 
+    @MainActor
     func startRecording() async throws {
         guard !isRecording else { return }
 
+        // No lock needed here — background callbacks haven't started yet.
+        // We reset *before* calling startSystemAudioCapture(), so there's
+        // no concurrent writer at this point.
         systemAudioSamples = []
         micSamples = []
 
@@ -35,7 +43,8 @@ class AudioRecorder: NSObject, ObservableObject {
         print("AudioRecorder: recording started")
     }
 
-    /// Stop recording and write mixed audio to a temp WAV. Returns the file URL.
+    /// Stop recording and write mixed audio to a WAV in ~/Documents/TranscribeMeetings/.
+    @MainActor
     func stopRecording() async throws -> URL {
         guard isRecording else { throw RecorderError.notRecording }
 
@@ -51,6 +60,24 @@ class AudioRecorder: NSObject, ObservableObject {
         print("AudioRecorder: recording stopped")
 
         return try mixAndWriteWAV()
+    }
+
+    // MARK: - Meetings folder
+
+    /// ~/Downloads/Projects/transcribe-meetings/meetings/ during dev;
+    /// falls back to ~/Documents/TranscribeMeetings/ in production.
+    static func meetingsFolder() -> URL {
+        let projectMeetings = URL(fileURLWithPath:
+            "/Users/sumitkumar/Downloads/Projects/transcribe-meetings/meetings")
+        if (try? FileManager.default.createDirectory(
+                at: projectMeetings, withIntermediateDirectories: true)) != nil
+            || FileManager.default.fileExists(atPath: projectMeetings.path) {
+            return projectMeetings
+        }
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let folder = docs.appendingPathComponent("TranscribeMeetings")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
     }
 
     // MARK: - System Audio (ScreenCaptureKit)
@@ -69,6 +96,12 @@ class AudioRecorder: NSObject, ObservableObject {
         config.excludesCurrentProcessAudio = true
         config.sampleRate = Int(sampleRate)
         config.channelCount = 1
+        // SCStream always routes video frames even when only audio is requested.
+        // Setting a tiny resolution + 1 fps eliminates the
+        // "[ERROR] stream output NOT found. Dropping frame" log spam.
+        config.width = 2
+        config.height = 2
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
 
         let filter = SCContentFilter(
             display: display,
@@ -81,6 +114,14 @@ class AudioRecorder: NSObject, ObservableObject {
             self,
             type: .audio,
             sampleHandlerQueue: .global(qos: .userInteractive)
+        )
+        // SCKit always delivers video frames regardless of whether we want them.
+        // Registering a no-op .screen handler silences the internal XPC log spam:
+        // "_SCStream_RemoteVideoQueueOperationHandlerWithError … Dropping frame"
+        try stream.addStreamOutput(
+            self,
+            type: .screen,
+            sampleHandlerQueue: .global(qos: .background)
         )
         try await stream.startCapture()
         self.scStream = stream
@@ -106,6 +147,7 @@ class AudioRecorder: NSObject, ObservableObject {
             format: inputFormat
         ) { [weak self] buffer, _ in
             guard let self else { return }
+            // Extract samples on the callback thread before any actor hop
             let samples = self.convertAndExtract(buffer, from: inputFormat, to: targetFormat)
             self.lock.lock()
             self.micSamples.append(contentsOf: samples)
@@ -143,12 +185,16 @@ class AudioRecorder: NSObject, ObservableObject {
             Int16(max(-1.0, min(1.0, s)) * Float(Int16.max))
         }
 
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("meeting-\(Int(Date().timeIntervalSince1970)).wav")
+        let stamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+            .replacingOccurrences(of: "T", with: "_")
+            .replacingOccurrences(of: "Z", with: "")
+        let url = Self.meetingsFolder()
+            .appendingPathComponent("meeting-\(stamp).wav")
         try writeWAV(samples: int16Samples, sampleRate: Int(sampleRate), to: url)
 
-        let sizeMB = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) ?? 0
-        print("AudioRecorder: WAV saved → \(url.lastPathComponent) (\(sizeMB / 1024)KB)")
+        let sizeKB = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) ?? 0
+        print("AudioRecorder: WAV saved → \(url.path) (\(sizeKB / 1024) KB)")
         return url
     }
 
@@ -196,12 +242,13 @@ class AudioRecorder: NSObject, ObservableObject {
     }
 }
 
-// MARK: - SCStreamOutput (system audio callbacks)
+// MARK: - SCStreamOutput
 
 extension AudioRecorder: SCStreamOutput {
     nonisolated func stream(_ stream: SCStream,
                             didOutputSampleBuffer buffer: CMSampleBuffer,
                             of type: SCStreamOutputType) {
+        // Silently discard video frames — we only care about audio.
         guard type == .audio,
               let blockBuffer = CMSampleBufferGetDataBuffer(buffer) else { return }
 
