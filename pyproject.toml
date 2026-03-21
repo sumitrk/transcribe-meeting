@@ -14,5 +14,6 @@ dependencies = [
     "python-multipart>=0.0.22",
     "scipy>=1.17.1",
     "sounddevice>=0.5.5",
+    "soundfile>=0.13.1",
     "uvicorn[standard]>=0.42.0",
 ]

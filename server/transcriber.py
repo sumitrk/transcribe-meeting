@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import mlx_whisper
+import numpy as np
+import soundfile as sf
 
 _HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
 MODEL_CACHE = Path.home() / "Library" / "Application Support" / "TranscribeMeeting" / "models"
@@ -34,8 +36,19 @@ def transcribe_chunks(chunk_paths: list[Path], model: str) -> str:
 
     for i, path in enumerate(chunk_paths, start=1):
         print(f"Transcribing chunk {i}/{total}: {path.name}...", flush=True)
+        # Load audio with soundfile (no ffmpeg needed — works directly with our WAV files).
+        # mlx_whisper.transcribe() accepts a float32 numpy array at 16 kHz.
+        audio, sr = sf.read(str(path), dtype="float32", always_2d=False)
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)          # stereo → mono
+        if sr != 16000:
+            # Simple resample via numpy (only needed if something changed the WAV)
+            ratio = 16000 / sr
+            out_len = int(len(audio) * ratio)
+            indices = np.linspace(0, len(audio) - 1, out_len)
+            audio = np.interp(indices, np.arange(len(audio)), audio).astype(np.float32)
         result = mlx_whisper.transcribe(
-            str(path),
+            audio,
             path_or_hf_repo=model,
             verbose=False,
         )
