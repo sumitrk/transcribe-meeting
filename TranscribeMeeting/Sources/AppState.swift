@@ -55,7 +55,6 @@ class AppState: ObservableObject {
             }
         )
 
-        requestAccessibilityIfNeeded()
     }
 
     var isReady: Bool { status == .ready }
@@ -191,12 +190,6 @@ class AppState: ObservableObject {
     // MARK: - Accessibility
 
     var canAutoPaste: Bool { AXIsProcessTrusted() }
-
-    private func requestAccessibilityIfNeeded() {
-        guard !AXIsProcessTrusted() else { return }
-        let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
-        AXIsProcessTrustedWithOptions(opts)
-    }
 
     func requestAccessibility() {
         let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
