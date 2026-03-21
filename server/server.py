@@ -25,7 +25,7 @@ def health():
 @app.post("/transcribe")
 async def transcribe(
     file: UploadFile = File(...),
-    model: str = Form(default="mlx-community/whisper-small-mlx"),
+    model: str = Form(default="mlx-community/whisper-large-v3-turbo"),
 ):
     """Receive a WAV file, return the transcript."""
     suffix = Path(file.filename or "audio.wav").suffix or ".wav"
@@ -70,11 +70,13 @@ def summarise(req: SummariseRequest):
 
 # ── Models ─────────────────────────────────────────────────────────────────────
 
+DEFAULT_MODEL = "mlx-community/whisper-large-v3-turbo"
+
 AVAILABLE_MODELS = [
-    {"id": "mlx-community/whisper-tiny-mlx",     "label": "Tiny",     "size_mb": 40},
-    {"id": "mlx-community/whisper-small-mlx",    "label": "Small",    "size_mb": 150},
-    {"id": "mlx-community/whisper-medium-mlx",   "label": "Medium",   "size_mb": 500},
-    {"id": "mlx-community/whisper-large-v3-mlx", "label": "Large v3", "size_mb": 3000},
+    {"id": "mlx-community/whisper-tiny-mlx",        "label": "Tiny",           "size_mb": 40},
+    {"id": "mlx-community/whisper-small-mlx",       "label": "Small",          "size_mb": 150},
+    {"id": "mlx-community/whisper-large-v3-turbo",  "label": "Large v3 Turbo", "size_mb": 809},
+    {"id": "mlx-community/whisper-large-v3-mlx",    "label": "Large v3",       "size_mb": 3000},
 ]
 
 # HuggingFace cache where mlx-whisper stores downloaded models

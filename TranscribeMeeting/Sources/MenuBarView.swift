@@ -10,9 +10,9 @@ struct MenuBarView: View {
 
         Divider()
 
-        // Start / Stop recording (wired up in Step 3)
+        // Start / Stop recording
         Button(appState.isRecording ? "Stop Recording" : "Start Recording") {
-            // TODO: Step 3 — toggle recording
+            appState.toggleRecording()
         }
         .disabled(!appState.isReady && !appState.isRecording)
 

@@ -28,5 +28,8 @@ targets:
         CODE_SIGN_ENTITLEMENTS: TranscribeMeeting/TranscribeMeeting.entitlements
         # Hide dock icon — menu bar only
         LSUIElement: YES
+    dependencies:
+      - sdk: ScreenCaptureKit.framework
+      - sdk: AVFoundation.framework
     entitlements:
       path: TranscribeMeeting/TranscribeMeeting.entitlements
