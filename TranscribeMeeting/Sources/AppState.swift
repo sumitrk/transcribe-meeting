@@ -12,7 +12,7 @@ enum AppStatus: Equatable {
 }
 
 /// Tracks how the current recording was triggered.
-private enum RecordingMode {
+fileprivate enum RecordingMode {
     case markdown   // ⌘⇧T: Whisper → Claude → .md file → Finder
     case paste      // Fn:   Whisper only → clipboard + auto-paste
 }
