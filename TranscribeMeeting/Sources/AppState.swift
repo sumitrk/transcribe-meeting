@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import UserNotifications
 
 enum AppStatus: Equatable {
     case starting
@@ -34,10 +33,7 @@ class AppState: ObservableObject {
     private var recordingStartedAt: Date?
 
     init() {
-        Task {
-            await requestNotificationPermission()
-            await startServer()
-        }
+        Task { await startServer() }
         hotkey.start { [weak self] in self?.toggleRecording() }
     }
 
@@ -115,9 +111,8 @@ class AppState: ObservableObject {
             lastMeetingPath = mdURL.path
             status = .ready
 
-            // 5. Reveal in Finder + send notification
+            // 5. Reveal in Finder
             NSWorkspace.shared.selectFile(mdURL.path, inFileViewerRootedAtPath: "")
-            sendNotification(mdURL: mdURL)
 
         } catch {
             isRecording = false
@@ -154,23 +149,6 @@ class AppState: ObservableObject {
         f.dateStyle = .medium
         f.timeStyle = .short
         return f.string(from: date)
-    }
-
-    // MARK: - Notifications
-
-    private func requestNotificationPermission() async {
-        try? await UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound])
-    }
-
-    private func sendNotification(mdURL: URL) {
-        let content = UNMutableNotificationContent()
-        content.title = "Meeting saved"
-        content.body  = mdURL.deletingPathExtension().lastPathComponent
-        content.sound = .default
-        let req = UNNotificationRequest(identifier: UUID().uuidString,
-                                        content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(req)
     }
 
     // MARK: - Server startup

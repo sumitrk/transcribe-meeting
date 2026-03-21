@@ -32,6 +32,5 @@ targets:
       - sdk: CoreAudio.framework
       - sdk: AudioToolbox.framework
       - sdk: AVFoundation.framework
-      - sdk: UserNotifications.framework
     entitlements:
       path: TranscribeMeeting/TranscribeMeeting.entitlements
