@@ -11,7 +11,7 @@ settings:
     SWIFT_VERSION: "5.9"
     MACOSX_DEPLOYMENT_TARGET: "14.2"
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: ""  # XcodeGen will use your default team
+    DEVELOPMENT_TEAM: "WXZ5N9S74R"
 
 targets:
   TranscribeMeeting:
