@@ -1,18 +1,72 @@
 import AppKit
 import SwiftUI
 
+// MARK: - PTT preset options
+
+enum PTTPreset: String, CaseIterable, Identifiable {
+    case globe    = "Globe / Fn"
+    case rightCmd = "⌘ (Right)"
+    case rightOpt = "⌥ (Right)"
+    case rightShift = "⇧ (Right)"
+    case custom   = "Custom"
+
+    var id: String { rawValue }
+
+    /// keyCode for the preset (nil = Custom, user picks their own)
+    var keyCode: Int? {
+        switch self {
+        case .globe:      return 63
+        case .rightCmd:   return 54
+        case .rightOpt:   return 61
+        case .rightShift: return 60
+        case .custom:     return nil
+        }
+    }
+}
+
+// MARK: - View
+
 struct ShortcutsSettingsView: View {
     @ObservedObject private var store = SettingsStore.shared
+
+    /// Derived from current keyCode — updates picker selection without extra storage.
+    private var pttPreset: PTTPreset {
+        guard store.pttModifiers == 0 else { return .custom }
+        return PTTPreset.allCases.first { $0.keyCode == store.pttKeyCode } ?? .custom
+    }
 
     var body: some View {
         Form {
             // MARK: Push-to-Talk
             Section {
                 LabeledContent("Key") {
-                    PTTRecorderView(
-                        keyCode:   $store.pttKeyCode,
-                        modifiers: $store.pttModifiers
-                    )
+                    Picker("", selection: Binding(
+                        get: { pttPreset },
+                        set: { preset in
+                            if let kc = preset.keyCode {
+                                store.pttKeyCode = kc
+                                store.pttModifiers = 0
+                            }
+                            // Custom: leave keyCode as-is; recorder below will update it
+                        }
+                    )) {
+                        ForEach(PTTPreset.allCases) { preset in
+                            Text(preset.rawValue).tag(preset)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+
+                // Only show key recorder when Custom is selected
+                if pttPreset == .custom {
+                    LabeledContent("Custom key") {
+                        PTTRecorderView(
+                            keyCode:   $store.pttKeyCode,
+                            modifiers: $store.pttModifiers
+                        )
+                    }
                 }
             } header: {
                 Text("Push-to-Talk")
@@ -35,9 +89,7 @@ struct ShortcutsSettingsView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Button {
-                            pickFolder()
-                        } label: {
+                        Button { pickFolder() } label: {
                             Image(systemName: "folder")
                         }
                         .buttonStyle(.borderless)
