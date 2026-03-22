@@ -28,11 +28,15 @@ final class HotkeyManager {
         onPress:   @escaping @MainActor () -> Void,
         onRelease: @escaping @MainActor () -> Void
     ) {
+        var isFnDown = false
         pttMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { event in
             guard event.keyCode == 63 else { return }  // 63 = Fn/Globe key
-            if event.modifierFlags.contains(.function) {
+            let nowDown = event.modifierFlags.contains(.function)
+            if nowDown && !isFnDown {
+                isFnDown = true
                 Task { @MainActor in onPress() }
-            } else {
+            } else if !nowDown && isFnDown {
+                isFnDown = false
                 Task { @MainActor in onRelease() }
             }
         }
