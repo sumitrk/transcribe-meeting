@@ -94,39 +94,53 @@ private struct ModelRow: View {
     let onDownload:    () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Active indicator
-            Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(isActive ? Color.blue : Color.secondary)
-                .imageScale(.large)
-                .onTapGesture { if model.downloaded { onSelect() } }
-
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(model.label)
                     .fontWeight(isActive ? .semibold : .regular)
-                Text("\(model.size_mb) MB")
+                Text(formattedSize)
                     .foregroundStyle(.secondary)
                     .font(.caption)
             }
 
             Spacer()
 
-            if isDownloading {
-                ProgressView()
-                    .scaleEffect(0.7)
-            } else if model.downloaded {
-                Text("Ready")
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-            } else {
-                Button("Download", action: onDownload)
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.blue)
-            }
+            actionView
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
-        .onTapGesture { if model.downloaded { onSelect() } }
+        .onTapGesture {
+            if model.downloaded && !isActive { onSelect() }
+        }
+    }
+
+    @ViewBuilder
+    private var actionView: some View {
+        if isDownloading {
+            HStack(spacing: 6) {
+                ProgressView().scaleEffect(0.7)
+                Text("Downloading…").foregroundStyle(.secondary).font(.callout)
+            }
+        } else if isActive {
+            Label("Active", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.blue)
+                .font(.callout)
+                .fontWeight(.medium)
+        } else if model.downloaded {
+            Button("Activate", action: onSelect)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        } else {
+            Button("Download", action: onDownload)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+    }
+
+    private var formattedSize: String {
+        model.size_mb >= 1000
+            ? String(format: "%.1f GB", Double(model.size_mb) / 1000)
+            : "\(model.size_mb) MB"
     }
 }
 
