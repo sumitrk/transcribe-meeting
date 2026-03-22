@@ -56,7 +56,6 @@ class AppState: ObservableObject {
         )
 
         requestAccessibilityOnce()
-        requestScreenCaptureOnce()
     }
 
     var isReady: Bool { status == .ready }
@@ -226,20 +225,6 @@ class AppState: ObservableObject {
                 if let data = item.data(forType: type) { copy.setData(data, forType: type) }
             }
             return copy
-        }
-    }
-
-    // MARK: - Screen Capture permission
-
-    /// Prompt for System Audio Recording permission on the very first launch.
-    /// CGRequestScreenCaptureAccess() opens System Settings if not already granted.
-    private func requestScreenCaptureOnce() {
-        let key = "hasPromptedScreenCapture"
-        guard !UserDefaults.standard.bool(forKey: key) else { return }
-        UserDefaults.standard.set(true, forKey: key)
-
-        if !CGPreflightScreenCaptureAccess() {
-            CGRequestScreenCaptureAccess()
         }
     }
 
