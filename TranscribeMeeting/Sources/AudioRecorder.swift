@@ -3,21 +3,25 @@ import AVFoundation
 import CoreAudio
 import Foundation
 
-// AudioRecorder is NOT @MainActor so the IOProc callback (DispatchQueue)
-// can safely touch sample buffers (protected by NSLock).
-// Public API methods that set @Published state are individually @MainActor.
+// AudioRecorder captures system audio via CATapDescription (macOS 14.2+) and
+// microphone via AVAudioEngine.
+//
+// CATap taps process audio BEFORE the hardware volume/mute stage, so audio is
+// captured even when the system is muted. privateTap + private aggregate device
+// keep the tap invisible system-wide (no screen-recording indicator).
+// The permission prompt is "System Audio Recording Only" (kTCCServiceAudioCapture),
+// not screen recording.
 class AudioRecorder: NSObject, ObservableObject {
 
     // MARK: - State
 
     @Published var isRecording = false
 
-    // MARK: - System audio (CoreAudio global process tap)
+    // MARK: - System audio (CATap + aggregate device)
 
-    private var tapID:             AudioObjectID        = AudioObjectID(kAudioObjectUnknown)
-    private var aggregateDeviceID: AudioDeviceID        = AudioDeviceID(kAudioObjectUnknown)
-    private var ioProcID:          AudioDeviceIOProcID? = nil
-    private var tapDescription:    CATapDescription?    = nil
+    private var tapObjectID: AudioObjectID = kAudioObjectUnknown
+    private var aggregateDeviceID: AudioDeviceID = kAudioObjectUnknown
+    private var tapIOProcID: AudioDeviceIOProcID? = nil
 
     // MARK: - Microphone (AVAudioEngine)
 
@@ -25,15 +29,11 @@ class AudioRecorder: NSObject, ObservableObject {
 
     // MARK: - Sample buffers (lock-protected)
 
-    /// Raw samples from the tap at tapSampleRate (mono).
     private var systemAudioSamples: [Float] = []
-    /// Samples from mic already resampled to targetSampleRate.
     private var micSamples: [Float] = []
     private let lock = NSLock()
 
-    /// Native sample rate reported by the tap (usually 44 100 or 48 000 Hz).
     private var tapSampleRate: Double = 48_000
-    /// Rate Whisper expects.
     private let targetSampleRate: Double = 16_000
 
     // MARK: - Public API
@@ -45,7 +45,7 @@ class AudioRecorder: NSObject, ObservableObject {
         systemAudioSamples = []
         micSamples = []
 
-        try startSystemAudioTap()
+        try startSystemAudioCapture()
         try startMicCapture()
 
         isRecording = true
@@ -56,7 +56,7 @@ class AudioRecorder: NSObject, ObservableObject {
     func stopRecording() async throws -> URL {
         guard isRecording else { throw RecorderError.notRecording }
 
-        stopSystemAudioTap()
+        stopSystemAudioCapture()
         stopMicCapture()
 
         isRecording = false
@@ -81,165 +81,121 @@ class AudioRecorder: NSObject, ObservableObject {
         return folder
     }
 
-    // MARK: - CoreAudio global mono tap (system audio, mute-independent)
-    //
-    // CATapDescription(monoGlobalTapButExcludeProcesses:) taps the entire
-    // system audio output as a MONO stream, BEFORE the hardware volume/mute
-    // stage — so recording continues even when the system is muted.
-    // Apple's documentation explicitly states the tap is "independent of the
-    // output device volume or mute state".
-    //
-    // This API triggers the "System Audio Recording Only" TCC permission —
-    // the narrow bucket shown in System Settings → Privacy & Security, same
-    // as Granola and ChatGPT.  (SCStream uses kTCCServiceScreenCapture and
-    // lands in the wider "Screen & System Audio Recording" bucket instead.)
+    // MARK: - System audio (CATap)
 
-    private func startSystemAudioTap() throws {
-        // 1. Global mono tap — captures all audio processes except our own.
-        //    Passing an empty array means "exclude nothing extra", which is
-        //    fine since our app produces no audio.
-        let desc = CATapDescription(monoGlobalTapButExcludeProcesses: [])
-        desc.uuid = UUID()
-        desc.muteBehavior = .unmuted   // speakers continue playing normally
-        self.tapDescription = desc
+    private func startSystemAudioCapture() throws {
+        // 1. Describe the tap: global mono mix, tap before mute stage, private.
+        let tapDesc = CATapDescription(monoGlobalTapButExcludeProcesses: [])
+        tapDesc.name = "TranscribeMeetingsTap"
+        tapDesc.muteBehavior = .unmuted   // capture even when system volume = 0
+        tapDesc.isPrivate = true          // invisible outside this process
 
-        // 2. Register the tap.
-        var tap = AudioObjectID(kAudioObjectUnknown)
-        let tapErr = AudioHardwareCreateProcessTap(desc, &tap)
-        guard tapErr == noErr else { throw RecorderError.tapError(tapErr) }
-        self.tapID = tap
+        // 2. Create the process tap — triggers "System Audio Recording" permission dialog.
+        var tapID: AudioObjectID = kAudioObjectUnknown
+        let tapStatus = AudioHardwareCreateProcessTap(tapDesc, &tapID)
+        guard tapStatus == noErr else {
+            throw RecorderError.tapCreationFailed(tapStatus)
+        }
+        tapObjectID = tapID
 
-        // 3. Read native sample rate.
-        tapSampleRate = readTapSampleRate(tapID: tap)
-
-        // 4. Build a private aggregate device that presents the tap as an input.
-        let sysOutID  = try defaultOutputDevice()
-        let outputUID = try uid(for: sysOutID)
-        let aggUID    = UUID().uuidString
-
-        let aggDesc: [String: Any] = [
-            kAudioAggregateDeviceNameKey:            "TranscribeMeetingTap",
-            kAudioAggregateDeviceUIDKey:             aggUID,
-            kAudioAggregateDeviceMainSubDeviceKey:   outputUID,
-            kAudioAggregateDeviceIsPrivateKey:       true,
-            kAudioAggregateDeviceIsStackedKey:       false,
-            kAudioAggregateDeviceSubDeviceListKey:   [[kAudioSubDeviceUIDKey: outputUID]],
-            kAudioAggregateDeviceTapListKey: [[
-                kAudioSubTapUIDKey:               desc.uuid.uuidString,
-                kAudioSubTapDriftCompensationKey: true,
-            ]],
+        // 3. Wrap in a private aggregate device so we can attach an IOProc.
+        //    "private": 1 is required when the tap is private — otherwise AudioDeviceStart
+        //    returns kAudioHardwareIllegalOperationError ('nope').
+        let tapUID = tapDesc.uuid.uuidString
+        let aggUID = "TranscribeMeetings-\(UUID().uuidString)"
+        let aggDict: [String: Any] = [
+            "name": "TranscribeMeetingsAggDevice",
+            "uid":  aggUID,
+            "private": 1,
+            "taps": [["uid": tapUID, "drift": 1]]
         ]
-
-        var aggID = AudioDeviceID(kAudioObjectUnknown)
-        let aggErr = AudioHardwareCreateAggregateDevice(aggDesc as CFDictionary, &aggID)
-        guard aggErr == noErr else { throw RecorderError.aggregateDeviceError(aggErr) }
-        self.aggregateDeviceID = aggID
-
-        // 5. IOProc receives PCM buffers from the aggregate device.
-        let tapQueue = DispatchQueue(label: "transcribe.tap", qos: .userInitiated)
-        var proc: AudioDeviceIOProcID? = nil
-        let procErr = AudioDeviceCreateIOProcIDWithBlock(&proc, aggID, tapQueue) {
-            [weak self] _, inInputData, _, _, _ in
-            guard let self else { return }
-
-            let abl = inInputData.pointee
-            guard abl.mNumberBuffers > 0 else { return }
-            let buf = abl.mBuffers
-            guard let rawPtr = buf.mData, buf.mDataByteSize > 0 else { return }
-
-            let floatCount = Int(buf.mDataByteSize) / MemoryLayout<Float>.size
-            let floatPtr   = rawPtr.bindMemory(to: Float.self, capacity: floatCount)
-
-            // Mono tap — one channel. If for any reason stereo arrives, average.
-            let channels = Int(buf.mNumberChannels)
-            if channels >= 2 {
-                var mono = [Float]()
-                mono.reserveCapacity(floatCount / channels)
-                var i = 0
-                while i + 1 < floatCount {
-                    mono.append((floatPtr[i] + floatPtr[i + 1]) / 2.0)
-                    i += channels
-                }
-                self.lock.lock()
-                self.systemAudioSamples.append(contentsOf: mono)
-                self.lock.unlock()
-            } else {
-                let samples = Array(UnsafeBufferPointer(start: floatPtr, count: floatCount))
-                self.lock.lock()
-                self.systemAudioSamples.append(contentsOf: samples)
-                self.lock.unlock()
-            }
-        }
-        guard procErr == noErr else { throw RecorderError.ioProcError(procErr) }
-        self.ioProcID = proc
-
-        // 6. Start the device.
-        let startErr = AudioDeviceStart(aggID, proc)
-        guard startErr == noErr else { throw RecorderError.deviceStartError(startErr) }
-
-        print("AudioRecorder: CoreAudio global mono tap started (\(tapSampleRate) Hz)")
-    }
-
-    private func stopSystemAudioTap() {
-        if aggregateDeviceID != AudioObjectID(kAudioObjectUnknown) {
-            AudioDeviceStop(aggregateDeviceID, ioProcID)
-            if let proc = ioProcID {
-                AudioDeviceDestroyIOProcID(aggregateDeviceID, proc)
-            }
-            AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
-            aggregateDeviceID = AudioObjectID(kAudioObjectUnknown)
-        }
-        if tapID != AudioObjectID(kAudioObjectUnknown) {
+        var aggID: AudioDeviceID = kAudioObjectUnknown
+        let aggStatus = AudioHardwareCreateAggregateDevice(aggDict as CFDictionary, &aggID)
+        guard aggStatus == noErr else {
             AudioHardwareDestroyProcessTap(tapID)
-            tapID = AudioObjectID(kAudioObjectUnknown)
+            tapObjectID = kAudioObjectUnknown
+            throw RecorderError.aggregateDeviceCreationFailed(aggStatus)
         }
-        ioProcID = nil
-        tapDescription = nil
+        aggregateDeviceID = aggID
+
+        // 4. Read the sample rate the aggregate device delivers.
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope:    kAudioObjectPropertyScopeGlobal,
+            mElement:  kAudioObjectPropertyElementMain)
+        var size = UInt32(MemoryLayout<Float64>.size)
+        var sr: Float64 = 48_000
+        AudioObjectGetPropertyData(aggID, &addr, 0, nil, &size, &sr)
+        tapSampleRate = sr
+
+        // 5. Register IOProc to receive audio from the aggregate device.
+        var procID: AudioDeviceIOProcID? = nil
+        let procStatus = AudioDeviceCreateIOProcIDWithBlock(&procID, aggID, nil) {
+            [weak self] _, inInputData, _, _, _ in
+            self?.handleTapAudio(inInputData)
+        }
+        guard procStatus == noErr, let procID else {
+            AudioHardwareDestroyAggregateDevice(aggID)
+            AudioHardwareDestroyProcessTap(tapID)
+            aggregateDeviceID = kAudioObjectUnknown
+            tapObjectID = kAudioObjectUnknown
+            throw RecorderError.ioProcCreationFailed(procStatus)
+        }
+        tapIOProcID = procID
+
+        // 6. Start — audio begins flowing into the IOProc.
+        let startStatus = AudioDeviceStart(aggID, procID)
+        guard startStatus == noErr else {
+            AudioDeviceDestroyIOProcID(aggID, procID)
+            AudioHardwareDestroyAggregateDevice(aggID)
+            AudioHardwareDestroyProcessTap(tapID)
+            tapIOProcID = nil
+            aggregateDeviceID = kAudioObjectUnknown
+            tapObjectID = kAudioObjectUnknown
+            throw RecorderError.audioDeviceStartFailed(startStatus)
+        }
+
+        print("AudioRecorder: CATap capture started (sr=\(sr)Hz)")
     }
 
-    // MARK: - CoreAudio helpers
-
-    private func defaultOutputDevice() throws -> AudioDeviceID {
-        var prop = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-            mScope:    kAudioObjectPropertyScopeGlobal,
-            mElement:  kAudioObjectPropertyElementMain
-        )
-        var deviceID = AudioDeviceID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        let err = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &prop, 0, nil, &size, &deviceID)
-        guard err == noErr, deviceID != kAudioObjectUnknown else {
-            throw RecorderError.noOutputDevice
+    private func stopSystemAudioCapture() {
+        if let procID = tapIOProcID, aggregateDeviceID != kAudioObjectUnknown {
+            AudioDeviceStop(aggregateDeviceID, procID)
+            AudioDeviceDestroyIOProcID(aggregateDeviceID, procID)
+            tapIOProcID = nil
         }
-        return deviceID
+        if aggregateDeviceID != kAudioObjectUnknown {
+            AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
+            aggregateDeviceID = kAudioObjectUnknown
+        }
+        if tapObjectID != kAudioObjectUnknown {
+            AudioHardwareDestroyProcessTap(tapObjectID)
+            tapObjectID = kAudioObjectUnknown
+        }
     }
 
-    private func uid(for deviceID: AudioDeviceID) throws -> String {
-        var prop = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceUID,
-            mScope:    kAudioObjectPropertyScopeGlobal,
-            mElement:  kAudioObjectPropertyElementMain
-        )
-        var cfUID: Unmanaged<CFString>? = nil
-        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        let err = AudioObjectGetPropertyData(deviceID, &prop, 0, nil, &size, &cfUID)
-        guard err == noErr, let uid = cfUID?.takeRetainedValue() else {
-            throw RecorderError.noOutputDevice
+    private func handleTapAudio(_ inputData: UnsafePointer<AudioBufferList>) {
+        let abl = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
+        var samples = [Float]()
+        for buf in abl {
+            guard let data = buf.mData, buf.mDataByteSize > 0 else { continue }
+            let count = Int(buf.mDataByteSize) / MemoryLayout<Float>.size
+            let ptr   = data.bindMemory(to: Float.self, capacity: count)
+            let ch    = Int(buf.mNumberChannels)
+            if ch >= 2 {
+                var i = 0
+                while i + 1 < count {
+                    samples.append((ptr[i] + ptr[i + 1]) / 2.0)
+                    i += ch
+                }
+            } else {
+                samples.append(contentsOf: UnsafeBufferPointer(start: ptr, count: count))
+            }
         }
-        return uid as String
-    }
-
-    private func readTapSampleRate(tapID: AudioObjectID) -> Double {
-        var prop = AudioObjectPropertyAddress(
-            mSelector: kAudioTapPropertyFormat,
-            mScope:    kAudioObjectPropertyScopeGlobal,
-            mElement:  kAudioObjectPropertyElementMain
-        )
-        var asbd = AudioStreamBasicDescription()
-        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        AudioObjectGetPropertyData(tapID, &prop, 0, nil, &size, &asbd)
-        return asbd.mSampleRate > 0 ? asbd.mSampleRate : 48_000
+        guard !samples.isEmpty else { return }
+        lock.lock()
+        systemAudioSamples.append(contentsOf: samples)
+        lock.unlock()
     }
 
     // MARK: - Microphone (AVAudioEngine)
@@ -374,24 +330,22 @@ class AudioRecorder: NSObject, ObservableObject {
 
 enum RecorderError: LocalizedError {
     case notRecording
-    case noOutputDevice
-    case tapError(OSStatus)
-    case aggregateDeviceError(OSStatus)
-    case ioProcError(OSStatus)
-    case deviceStartError(OSStatus)
+    case tapCreationFailed(OSStatus)
+    case aggregateDeviceCreationFailed(OSStatus)
+    case ioProcCreationFailed(OSStatus)
+    case audioDeviceStartFailed(OSStatus)
     case formatError
     case noAudioCaptured
 
     var errorDescription: String? {
         switch self {
-        case .notRecording:                return "Not currently recording"
-        case .noOutputDevice:              return "No audio output device found"
-        case .tapError(let s):             return "CoreAudio tap creation failed (OSStatus \(s))"
-        case .aggregateDeviceError(let s): return "Aggregate device creation failed (OSStatus \(s))"
-        case .ioProcError(let s):          return "IOProc creation failed (OSStatus \(s))"
-        case .deviceStartError(let s):     return "Device start failed (OSStatus \(s))"
-        case .formatError:                 return "Audio format conversion failed"
-        case .noAudioCaptured:             return "No audio was captured"
+        case .notRecording:                          return "Not currently recording"
+        case .tapCreationFailed(let s):              return "Failed to create audio tap (err \(s))"
+        case .aggregateDeviceCreationFailed(let s):  return "Failed to create aggregate device (err \(s))"
+        case .ioProcCreationFailed(let s):           return "Failed to create IOProc (err \(s))"
+        case .audioDeviceStartFailed(let s):         return "Failed to start audio device (err \(s))"
+        case .formatError:                           return "Audio format conversion failed"
+        case .noAudioCaptured:                       return "No audio was captured"
         }
     }
 }
