@@ -41,7 +41,6 @@ struct ModelSettingsView: View {
             }
             .listStyle(.inset)
         }
-        .navigationTitle("Transcription Model")
         .task { await fetchModels() }
     }
 

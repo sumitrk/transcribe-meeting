@@ -21,20 +21,23 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 }
 
 struct SettingsView: View {
-    @State private var selection: SettingsSection? = .general
+    @State private var selection: SettingsSection = .general
 
     var body: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
+            // Sidebar — plain List, no NavigationSplitView = no toolbar icon
             List(SettingsSection.allCases, selection: $selection) { section in
                 Label(section.rawValue, systemImage: section.icon)
                     .tag(section)
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(160)
-            .navigationTitle("Settings")
-        } detail: {
+            .frame(width: 160)
+
+            Divider()
+
+            // Detail panel
             Group {
-                switch selection ?? .general {
+                switch selection {
                 case .general:     GeneralSettingsView()
                 case .shortcuts:   ShortcutsSettingsView()
                 case .model:       ModelSettingsView()
@@ -45,6 +48,5 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(width: 620, height: 460)
-        .toolbar(removing: .sidebarToggle)
     }
 }

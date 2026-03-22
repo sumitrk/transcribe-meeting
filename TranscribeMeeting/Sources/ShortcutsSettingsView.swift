@@ -50,7 +50,6 @@ struct ShortcutsSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("Shortcuts")
     }
 
     private func pickFolder() {

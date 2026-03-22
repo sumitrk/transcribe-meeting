@@ -29,6 +29,5 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("General")
     }
 }

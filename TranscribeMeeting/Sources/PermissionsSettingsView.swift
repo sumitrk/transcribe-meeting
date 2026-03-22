@@ -28,7 +28,6 @@ struct PermissionsSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("Permissions")
         .onAppear { checkAll() }
     }
 

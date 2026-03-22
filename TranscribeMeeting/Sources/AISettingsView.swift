@@ -59,7 +59,6 @@ struct AISettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("AI")
         .animation(.default, value: store.aiEnabled)
     }
 
