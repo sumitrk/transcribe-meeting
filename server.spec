@@ -22,6 +22,8 @@ COLLECT_ALL = [
     "httpx",
 ]
 
+import os, sys
+
 datas = []
 binaries = []
 hiddenimports = []
@@ -31,6 +33,15 @@ for pkg in COLLECT_ALL:
     datas     += d
     binaries  += b
     hiddenimports += h
+
+# collect_all('mlx') misses the compiled Metal shader library.
+# MLX looks for mlx.metallib relative to its own package path, so the
+# destination must be mlx/lib/ inside the bundle.
+import mlx.core as _mlx_core
+_mlx_dir = os.path.dirname(os.path.dirname(_mlx_core.__file__))  # mlx/core.so -> mlx/
+_metallib = os.path.join(_mlx_dir, "lib", "mlx.metallib")
+if os.path.exists(_metallib):
+    datas.append((_metallib, "mlx/lib"))
 
 # uvicorn dynamically imports its loop/protocol backends
 hiddenimports += [
