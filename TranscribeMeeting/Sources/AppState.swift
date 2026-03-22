@@ -26,6 +26,9 @@ class AppState: ObservableObject {
     @Published var lastMeetingPath: String? = nil
     /// Set after every transcription — observed by the onboarding test screen.
     @Published var lastTranscript: String = ""
+    /// When true, transcription result is shown in lastTranscript but NOT pasted.
+    /// Set during onboarding so the test box works without pasting into other apps.
+    var suppressPaste = false
 
     let server   = PythonServer()
     let recorder = AudioRecorder()
@@ -75,7 +78,9 @@ class AppState: ObservableObject {
 
     func showOnboardingWindow() {
         if onboardingWindow != nil { onboardingWindow?.makeKeyAndOrderFront(nil); return }
+        suppressPaste = true   // don't paste into other apps during onboarding test
         let view = OnboardingView { [weak self] in
+            self?.suppressPaste = false
             self?.onboardingWindow?.close()
             self?.onboardingWindow = nil
         }
@@ -185,7 +190,7 @@ class AppState: ObservableObject {
             case .paste:
                 status = .ready
                 playSound("Bottle")
-                copyAndPaste(rawTranscript)
+                if !suppressPaste { copyAndPaste(rawTranscript) }
                 try? FileManager.default.removeItem(at: wavURL)
 
             case .markdown:

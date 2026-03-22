@@ -338,81 +338,156 @@ private struct ModelStep: View {
 
 private struct ModelsResponse: Decodable { let models: [ModelInfo] }
 
-// MARK: - Step 3: Try it out
+// MARK: - Step 3: Configure & Try
 
 private struct TryItStep: View {
     let onDone: () -> Void
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var store = SettingsStore.shared
     @State private var previewText: String = ""
+    @State private var pttPreset: PTTPreset = .globe
+    @State private var pttRecorderAutoStart = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Try it out")
-                .font(.title2.bold())
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Configure & Try")
+                    .font(.title2.bold())
 
-            // Editable transcript preview
-            ZStack(alignment: .topLeading) {
-                TextEditor(text: $previewText)
-                    .font(.body)
-                    .scrollContentBackground(.hidden)
-                    .padding(6)
-                if previewText.isEmpty {
-                    Text("Type something, or hold \(store.pttKeyLabel) to record…")
-                        .foregroundStyle(.tertiary)
-                        .padding(12)
-                        .allowsHitTesting(false)
-                }
-            }
-            .frame(height: 120)
-            .background(.background, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor), lineWidth: 0.5))
+                // ── Push-to-Talk ──────────────────────────────────────────
+                OnboardingCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Push-to-Talk")
+                                .fontWeight(.semibold)
+                            Text("Hold a key to record, release to transcribe.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
 
-            // Instruction below the box
-            Label("Hold **\(store.pttKeyLabel)** anywhere on your Mac to record. Release to transcribe.", systemImage: "info.circle")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                        HStack {
+                            Text("Key").foregroundStyle(.secondary).font(.callout)
+                            Spacer()
+                            Picker("", selection: $pttPreset) {
+                                ForEach(PTTPreset.allCases) { p in
+                                    Text(p.rawValue).tag(p)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .fixedSize()
+                            .onChange(of: pttPreset) { preset in
+                                if let kc = preset.keyCode {
+                                    store.pttKeyCode = kc; store.pttModifiers = 0
+                                } else { pttRecorderAutoStart = true }
+                            }
+                        }
 
-            // Transcript folder — entire row is tappable
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Save transcripts to")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Button(action: pickFolder) {
-                    HStack(spacing: 8) {
-                        Text(store.transcriptFolder.abbreviatedPath)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer()
-                        Image(systemName: "folder")
-                            .foregroundStyle(.secondary)
+                        if pttPreset == .custom {
+                            HStack {
+                                Text("Custom key").foregroundStyle(.secondary).font(.callout)
+                                Spacer()
+                                PTTRecorderView(
+                                    keyCode: $store.pttKeyCode,
+                                    modifiers: $store.pttModifiers,
+                                    startImmediately: pttRecorderAutoStart
+                                )
+                                .onAppear { pttRecorderAutoStart = false }
+                            }
+                        }
                     }
-                    .padding(10)
-                    .frame(maxWidth: .infinity)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 7))
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(NSColor.separatorColor), lineWidth: 0.5))
                 }
-                .buttonStyle(.plain)
+
+                // ── Toggle Record ─────────────────────────────────────────
+                OnboardingCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Toggle Recording")
+                                .fontWeight(.semibold)
+                            Text("Press once to start, press again to stop and save as markdown.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+
+                        HStack {
+                            Text("Key").foregroundStyle(.secondary).font(.callout)
+                            Spacer()
+                            KeyRecorderView(
+                                keyCode: $store.toggleKeyCode,
+                                modifiers: $store.toggleModifiers
+                            )
+                        }
+
+                        // Transcript folder
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Save transcripts to").foregroundStyle(.secondary).font(.callout)
+                            Button(action: pickFolder) {
+                                HStack {
+                                    Text(store.transcriptFolder.abbreviatedPath)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Spacer()
+                                    Image(systemName: "folder").foregroundStyle(.secondary)
+                                }
+                                .padding(8)
+                                .frame(maxWidth: .infinity)
+                                .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(NSColor.separatorColor), lineWidth: 0.5))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                // ── Test area ─────────────────────────────────────────────
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Test it out").fontWeight(.semibold)
+
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $previewText)
+                            .font(.body)
+                            .scrollContentBackground(.hidden)
+                            .padding(6)
+                        if previewText.isEmpty {
+                            Text("Transcript will appear here…")
+                                .foregroundStyle(.tertiary)
+                                .padding(12)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .frame(height: 90)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor), lineWidth: 0.5))
+
+                    Label("Click somewhere outside this window, hold **\(store.pttKeyLabel)**, speak, release — transcript appears above without pasting.", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
-
-            Spacer()
-
+            .padding(24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .bottom) {
             HStack {
                 Spacer()
                 Button("Start Using App") { onDone() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return)
             }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+            .background(.regularMaterial)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(28)
+        .onAppear { pttPreset = derivedPreset() }
         .onChange(of: appState.lastTranscript) {
             if !appState.lastTranscript.isEmpty {
                 previewText = appState.lastTranscript
             }
         }
+    }
+
+    private func derivedPreset() -> PTTPreset {
+        guard store.pttModifiers == 0 else { return .custom }
+        return PTTPreset.allCases.first { $0.keyCode == store.pttKeyCode } ?? .custom
     }
 
     private func pickFolder() {
@@ -424,5 +499,18 @@ private struct TryItStep: View {
         if panel.runModal() == .OK, let url = panel.url {
             store.transcriptFolderPath = url.path
         }
+    }
+}
+
+// MARK: - Card container
+
+private struct OnboardingCard<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        content()
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(NSColor.separatorColor), lineWidth: 0.5))
     }
 }
