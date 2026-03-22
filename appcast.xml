@@ -5,6 +5,17 @@
         <link>https://github.com/sumitrk/transcribe-meeting</link>
         <description>Most recent changes with links to updates.</description>
         <language>en</language>
-        <!-- Entries are added automatically by distribute.sh -->
+        <item>
+            <title>Version 0.2.0</title>
+            <sparkle:version>1</sparkle:version>
+            <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
+            <pubDate>Sun, 22 Mar 2026 13:28:27 +0000</pubDate>
+            <enclosure
+                url="https://github.com/sumitrk/transcribe-meeting/releases/download/v0.2.0/TranscribeMeeting.dmg"
+                sparkle:edSignature="8KVYOT77DZ8w0CyoAWaApG1wNyUwA3T9tkg6C8YQ3+M6Sw+xdOBNVVr23W2sAwINS+zTH1IdoMX37tz6ILE8Ag=="
+                length="652917162"
+                type="application/octet-stream"
+            />
+        </item>
     </channel>
 </rss>
