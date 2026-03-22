@@ -1,11 +1,10 @@
 import SwiftUI
 
 struct ModelInfo: Decodable, Identifiable {
-    let id:          String
-    let label:       String
-    let size_mb:     Int
-    let downloaded:  Bool
-    let languages:   String
+    let id:         String
+    let label:      String
+    let size_mb:    Int
+    let downloaded: Bool
 }
 
 private struct ModelsResponse: Decodable { let models: [ModelInfo] }
@@ -106,14 +105,9 @@ private struct ModelRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.label)
                     .fontWeight(isActive ? .semibold : .regular)
-                HStack(spacing: 8) {
-                    Text("\(model.size_mb) MB")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                    Text(model.languages)
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                }
+                Text("\(model.size_mb) MB")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
             }
 
             Spacer()

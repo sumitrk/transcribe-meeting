@@ -2,25 +2,37 @@ import AppKit
 
 /// Manages two hotkey modes:
 ///
-/// 1. **Toggle** (⌘⇧T): press once to start, press again to stop.
+/// 1. **Toggle** (configurable, default ⌘⇧T): press once to start, press again to stop.
 /// 2. **Push-to-talk** (Fn): hold to record, release to stop.
 ///
-/// Both use NSEvent global monitors — no Accessibility permission required
-/// to *detect* the keys. The events are observed but not consumed, so they
-/// still reach the focused app (Fn has no standard meaning in other apps).
+/// Global monitors fire when OTHER apps are active.
+/// Local monitors fire when THIS app is active (e.g. Settings window is open).
+/// Both are registered together so the hotkey works everywhere.
 final class HotkeyManager {
-    private var toggleMonitor: Any?
+    private var toggleGlobalMonitor: Any?
+    private var toggleLocalMonitor: Any?
     private var pttMonitor: Any?
 
     // MARK: - Toggle mode (configurable, default ⌘⇧T)
 
     func start(keyCode: Int, modifiers: NSEvent.ModifierFlags,
                onTrigger: @escaping @MainActor () -> Void) {
-        if let m = toggleMonitor { NSEvent.removeMonitor(m) }
-        toggleMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+        if let m = toggleGlobalMonitor { NSEvent.removeMonitor(m); toggleGlobalMonitor = nil }
+        if let m = toggleLocalMonitor  { NSEvent.removeMonitor(m); toggleLocalMonitor  = nil }
+
+        // Fires when another app is frontmost
+        toggleGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard flags == modifiers, event.keyCode == UInt16(keyCode) else { return }
             Task { @MainActor in onTrigger() }
+        }
+
+        // Fires when this app is frontmost (e.g. Settings window focused)
+        toggleLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard flags == modifiers, event.keyCode == UInt16(keyCode) else { return event }
+            Task { @MainActor in onTrigger() }
+            return nil // consume so the system doesn't beep
         }
     }
 
@@ -47,7 +59,8 @@ final class HotkeyManager {
     // MARK: - Cleanup
 
     func stop() {
-        if let m = toggleMonitor { NSEvent.removeMonitor(m); toggleMonitor = nil }
-        if let m = pttMonitor    { NSEvent.removeMonitor(m); pttMonitor    = nil }
+        if let m = toggleGlobalMonitor { NSEvent.removeMonitor(m); toggleGlobalMonitor = nil }
+        if let m = toggleLocalMonitor  { NSEvent.removeMonitor(m); toggleLocalMonitor  = nil }
+        if let m = pttMonitor          { NSEvent.removeMonitor(m); pttMonitor          = nil }
     }
 }

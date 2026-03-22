@@ -1,8 +1,8 @@
+import AppKit
 import SwiftUI
 
 struct ShortcutsSettingsView: View {
     @ObservedObject private var store = SettingsStore.shared
-    @State private var showingFolderPicker = false
 
     var body: some View {
         Form {
@@ -33,38 +33,45 @@ struct ShortcutsSettingsView: View {
                 }
 
                 LabeledContent("Save transcripts to") {
-                    HStack {
+                    HStack(spacing: 6) {
                         Text(store.transcriptFolder.abbreviatedPath)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Button("Change…") { showingFolderPicker = true }
-                            .buttonStyle(.borderless)
+                        Button {
+                            pickFolder()
+                        } label: {
+                            Image(systemName: "folder")
+                        }
+                        .buttonStyle(.borderless)
                     }
                 }
             } header: {
                 Text("Toggle Record  (saves transcript as markdown)")
             } footer: {
-                Text("Press ⌘⇧T to start, press again to stop and save.")
+                Text("Press \(store.toggleKeyLabel) to start, press again to stop and save.")
             }
         }
         .formStyle(.grouped)
         .navigationTitle("Shortcuts")
-        .fileImporter(
-            isPresented: $showingFolderPicker,
-            allowedContentTypes: [.folder]
-        ) { result in
-            if case .success(let url) = result {
-                _ = url.startAccessingSecurityScopedResource()
-                store.transcriptFolderPath = url.path
-            }
+    }
+
+    private func pickFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose the folder where transcripts will be saved."
+        if panel.runModal() == .OK, let url = panel.url {
+            store.transcriptFolderPath = url.path
         }
     }
 }
 
 // MARK: - KeyBadge
 
-private struct KeyBadge: View {
+struct KeyBadge: View {
     let label: String
     init(_ label: String) { self.label = label }
 
@@ -87,7 +94,7 @@ private struct KeyBadge: View {
 
 // MARK: - URL helper
 
-private extension URL {
+extension URL {
     var abbreviatedPath: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
