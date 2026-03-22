@@ -209,6 +209,7 @@ private struct ModelStep: View {
 
     @State private var models: [ModelInfo] = []
     @State private var downloading: Set<String> = []
+    @State private var downloadProgress: [String: Double] = [:]
     @State private var serverReady = false
     @State private var downloadError: String?
     @State private var pollTimer: Timer?
@@ -244,11 +245,12 @@ private struct ModelStep: View {
             } else {
                 List(models) { model in
                     ModelRow(
-                        model:         model,
-                        isActive:      store.activeModelId == model.id,
-                        isDownloading: downloading.contains(model.id),
-                        onSelect:      { store.activeModelId = model.id },
-                        onDownload:    { Task { await download(model) } }
+                        model:            model,
+                        isActive:         store.activeModelId == model.id && model.downloaded,
+                        isDownloading:    downloading.contains(model.id),
+                        downloadProgress: downloadProgress[model.id],
+                        onSelect:         { store.activeModelId = model.id },
+                        onDownload:       { Task { await download(model) } }
                     )
                 }
                 .listStyle(.inset)
@@ -280,7 +282,21 @@ private struct ModelStep: View {
 
     private func download(_ model: ModelInfo) async {
         downloading.insert(model.id)
-        defer { downloading.remove(model.id) }
+        downloadProgress[model.id] = 0.0
+        defer {
+            downloading.remove(model.id)
+            downloadProgress.removeValue(forKey: model.id)
+        }
+
+        // Poll progress while download is in-flight
+        let pollTask = Task {
+            while !Task.isCancelled {
+                await fetchDownloadProgress(for: model.id)
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            }
+        }
+        defer { pollTask.cancel() }
+
         var req = URLRequest(url: URL(string: "http://127.0.0.1:8765/models/download")!)
         req.httpMethod = "POST"
         let boundary = UUID().uuidString
@@ -288,17 +304,26 @@ private struct ModelStep: View {
         var body = Data()
         body.appendField("model_id", value: model.id, boundary: boundary)
         req.httpBody = body
-        req.timeoutInterval = 600
+        req.timeoutInterval = 1200
+
         do {
             let _ = try await URLSession.shared.data(for: req)
             await fetchModels()
-            // Auto-activate if this is the first downloaded model
             if store.activeModelId.isEmpty || !models.contains(where: { $0.downloaded && $0.id == store.activeModelId }) {
                 store.activeModelId = model.id
             }
         } catch {
             downloadError = "Download failed: \(error.localizedDescription)"
         }
+    }
+
+    private func fetchDownloadProgress(for modelId: String) async {
+        let encoded = modelId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? modelId
+        guard let url = URL(string: "http://127.0.0.1:8765/models/download-progress?model_id=\(encoded)") else { return }
+        struct Resp: Decodable { let percent: Double }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let resp = try? JSONDecoder().decode(Resp.self, from: data) else { return }
+        downloadProgress[modelId] = resp.percent
     }
 }
 

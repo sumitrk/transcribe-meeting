@@ -11,9 +11,10 @@ private struct ModelsResponse: Decodable { let models: [ModelInfo] }
 
 struct ModelSettingsView: View {
     @ObservedObject private var store = SettingsStore.shared
-    @State private var models:       [ModelInfo] = []
-    @State private var downloading:  Set<String> = []
-    @State private var error:        String?
+    @State private var models:           [ModelInfo] = []
+    @State private var downloading:      Set<String> = []
+    @State private var downloadProgress: [String: Double] = [:]
+    @State private var error:            String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -32,11 +33,12 @@ struct ModelSettingsView: View {
 
             List(models) { model in
                 ModelRow(
-                    model:        model,
-                    isActive:     store.activeModelId == model.id,
-                    isDownloading: downloading.contains(model.id),
-                    onSelect:     { store.activeModelId = model.id },
-                    onDownload:   { Task { await download(model) } }
+                    model:            model,
+                    isActive:         store.activeModelId == model.id && model.downloaded,
+                    isDownloading:    downloading.contains(model.id),
+                    downloadProgress: downloadProgress[model.id],
+                    onSelect:         { store.activeModelId = model.id },
+                    onDownload:       { Task { await download(model) } }
                 )
             }
             .listStyle(.inset)
@@ -62,25 +64,45 @@ struct ModelSettingsView: View {
 
     private func download(_ model: ModelInfo) async {
         downloading.insert(model.id)
-        defer { downloading.remove(model.id) }
+        downloadProgress[model.id] = 0.0
+        defer {
+            downloading.remove(model.id)
+            downloadProgress.removeValue(forKey: model.id)
+        }
+
+        // Poll progress while download is in-flight
+        let pollTask = Task {
+            while !Task.isCancelled {
+                await fetchDownloadProgress(for: model.id)
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            }
+        }
+        defer { pollTask.cancel() }
 
         var req = URLRequest(url: URL(string: "http://127.0.0.1:8765/models/download")!)
         req.httpMethod = "POST"
         let boundary = UUID().uuidString
-        req.setValue("multipart/form-data; boundary=\(boundary)",
-                     forHTTPHeaderField: "Content-Type")
-
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         var body = Data()
         body.appendField("model_id", value: model.id, boundary: boundary)
-        req.httpBody  = body
-        req.timeoutInterval = 600   // large models take a while
+        req.httpBody = body
+        req.timeoutInterval = 1200
 
         do {
             let (_, _) = try await URLSession.shared.data(for: req)
-            await fetchModels()     // refresh download state
+            await fetchModels()
         } catch {
             self.error = "Download failed: \(error.localizedDescription)"
         }
+    }
+
+    private func fetchDownloadProgress(for modelId: String) async {
+        let encoded = modelId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? modelId
+        guard let url = URL(string: "http://127.0.0.1:8765/models/download-progress?model_id=\(encoded)") else { return }
+        struct Resp: Decodable { let percent: Double }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let resp = try? JSONDecoder().decode(Resp.self, from: data) else { return }
+        downloadProgress[modelId] = resp.percent
     }
 }
 
@@ -90,6 +112,7 @@ struct ModelRow: View {
     let model:         ModelInfo
     let isActive:      Bool
     let isDownloading: Bool
+    var downloadProgress: Double? = nil   // 0.0–1.0 when known, nil = indeterminate
     let onSelect:      () -> Void
     let onDownload:    () -> Void
 
@@ -117,11 +140,22 @@ struct ModelRow: View {
     @ViewBuilder
     private var actionView: some View {
         if isDownloading {
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(width: 16, height: 16)
-                Text("Downloading…").foregroundStyle(.secondary).font(.callout)
+            VStack(alignment: .trailing, spacing: 4) {
+                if let progress = downloadProgress {
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ProgressView(value: progress)
+                        .frame(width: 90)
+                        .tint(.blue)
+                } else {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 16, height: 16)
+                        Text("Downloading…").foregroundStyle(.secondary).font(.callout)
+                    }
+                }
             }
         } else if isActive && model.downloaded {
             Label("Active", systemImage: "checkmark.circle.fill")

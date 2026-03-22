@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import uvicorn
@@ -82,16 +85,68 @@ AVAILABLE_MODELS = [
 # HuggingFace cache where mlx-whisper stores downloaded models
 _HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
 
+# In-memory progress tracking: model_id -> {downloaded_mb, total_mb, done, error}
+_download_progress: dict[str, dict] = {}
+
 
 @app.get("/models")
 def list_models():
-    """List available Whisper models and whether they are already downloaded."""
+    """List available models and whether they are already downloaded."""
     result = []
     for m in AVAILABLE_MODELS:
         cache_name = "models--" + m["id"].replace("/", "--")
         downloaded = (_HF_CACHE / cache_name).exists()
         result.append({**m, "downloaded": downloaded})
     return {"models": result}
+
+
+@app.post("/models/download")
+async def download_model(model_id: str = Form(...)):
+    """Download a model from HuggingFace. Streams progress via /models/download-progress."""
+    model_info = next((m for m in AVAILABLE_MODELS if m["id"] == model_id), None)
+    if not model_info:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    total_mb = model_info["size_mb"]
+    _download_progress[model_id] = {"downloaded_mb": 0.0, "total_mb": total_mb, "done": False, "error": None}
+
+    # Track progress by watching the HuggingFace cache directory size
+    def track():
+        cache_key = "models--" + model_id.replace("/", "--")
+        cache_path = _HF_CACHE / cache_key
+        while not _download_progress[model_id]["done"]:
+            if cache_path.exists():
+                try:
+                    size = sum(f.stat().st_size for f in cache_path.rglob("*") if f.is_file())
+                    _download_progress[model_id]["downloaded_mb"] = min(size / (1024 * 1024), total_mb)
+                except Exception:
+                    pass
+            time.sleep(0.5)
+
+    tracker = threading.Thread(target=track, daemon=True)
+    tracker.start()
+
+    try:
+        from huggingface_hub import snapshot_download
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: snapshot_download(repo_id=model_id))
+        _download_progress[model_id].update({"downloaded_mb": float(total_mb), "done": True})
+    except Exception as e:
+        _download_progress[model_id].update({"done": True, "error": str(e)})
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"status": "ok", "model_id": model_id}
+
+
+@app.get("/models/download-progress")
+def download_progress(model_id: str):
+    """Return current download progress for a model (0.0–1.0)."""
+    info = _download_progress.get(model_id)
+    if not info:
+        return {"percent": 0.0, "downloaded_mb": 0.0, "total_mb": 0.0, "done": False, "error": None}
+    total = info["total_mb"] or 1
+    percent = min(info["downloaded_mb"] / total, 1.0)
+    return {**info, "percent": percent}
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
