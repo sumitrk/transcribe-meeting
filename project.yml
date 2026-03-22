@@ -14,6 +14,11 @@ settings:
     DEVELOPMENT_TEAM: "G6Z6DNHM33"
     OTHER_CODE_SIGN_FLAGS: '--requirements "=designated => identifier \"com.sumitrk.transcribe-meeting\" and anchor apple generic and certificate leaf[subject.OU] = \"G6Z6DNHM33\""'
 
+packages:
+  mlx-audio-swift:
+    url: https://github.com/Blaizzy/mlx-audio-swift.git
+    branch: main
+
 targets:
   TranscribeMeeting:
     type: application
@@ -33,3 +38,7 @@ targets:
       - sdk: CoreAudio.framework
       - sdk: AudioToolbox.framework
       - sdk: AVFoundation.framework
+      - package: mlx-audio-swift
+        product: MLXAudioSTT
+      - package: mlx-audio-swift
+        product: MLXAudioCore

@@ -3,7 +3,6 @@ import CoreGraphics
 import Foundation
 
 enum AppStatus: Equatable {
-    case starting
     case ready
     case recording
     case transcribing
@@ -13,22 +12,20 @@ enum AppStatus: Equatable {
 
 /// Tracks how the current recording was triggered.
 fileprivate enum RecordingMode {
-    case markdown   // ⌘⇧T: Whisper → Claude → .md file → Finder
-    case paste      // Fn:   Whisper only → clipboard + auto-paste
+    case markdown   // ⌘⇧T: Parakeet → Claude → .md file → Finder
+    case paste      // Fn:   Parakeet only → clipboard + auto-paste
 }
 
 @MainActor
 class AppState: ObservableObject {
-    @Published var status: AppStatus = .starting
+    @Published var status: AppStatus = .ready
     @Published var isRecording = false
     @Published var lastMeetingPath: String? = nil
 
-    let server   = PythonServer()
     let recorder = AudioRecorder()
-    let client   = TranscribeClient()
+    let stt      = STTClient()
+    let claude   = ClaudeClient()
     let hotkey   = HotkeyManager()
-
-    var whisperModel: String = "mlx-community/whisper-large-v3-turbo"
 
     var anthropicApiKey: String {
         UserDefaults.standard.string(forKey: "anthropicApiKey") ?? ""
@@ -38,8 +35,6 @@ class AppState: ObservableObject {
     private var currentMode: RecordingMode = .markdown
 
     init() {
-        Task { await startServer() }
-
         // ⌘⇧T — toggle: full markdown pipeline
         hotkey.start { [weak self] in self?.toggleMarkdown() }
 
@@ -62,7 +57,6 @@ class AppState: ObservableObject {
 
     var statusLabel: String {
         switch status {
-        case .starting:      return "Starting server…"
         case .ready:         return "Ready  (⌘⇧T to record | hold Fn to dictate)"
         case .recording:
             return currentMode == .paste
@@ -110,21 +104,21 @@ class AppState: ObservableObject {
             let wavURL = try await recorder.stopRecording()
             print("WAV saved: \(wavURL.path)")
 
-            let rawTranscript = try await client.transcribe(wavURL: wavURL, model: whisperModel)
+            // Transcribe using on-device Parakeet (downloads model on first use)
+            let rawTranscript = try await stt.transcribe(wavURL: wavURL)
             print("Transcript ready (\(rawTranscript.count) chars)")
 
             switch mode {
 
             case .paste:
-                // PTT: just paste the raw transcript, no markdown file
+                // PTT: paste raw transcript, no markdown file
                 status = .ready
-                playSound("Bottle")  // done cue — transcription complete
+                playSound("Bottle")  // done cue
                 copyAndPaste(rawTranscript)
-                // Delete the WAV — nothing to keep
                 try? FileManager.default.removeItem(at: wavURL)
 
             case .markdown:
-                // Toggle: full pipeline — Claude → .md → Finder
+                // Toggle: Claude → .md → Finder
                 let duration = Int(Date().timeIntervalSince(startedAt) / 60)
                 let mdURL = wavURL.deletingPathExtension().appendingPathExtension("md")
 
@@ -135,12 +129,12 @@ class AppState: ObservableObject {
                                        cleanedTranscript: rawTranscript, summary: nil)
                 } else {
                     status = .summarising
-                    let result = try await client.summarise(transcript: rawTranscript,
+                    let result = try await claude.summarise(transcript: rawTranscript,
                                                             apiKey: anthropicApiKey)
                     print("Summary ready")
                     md = buildMarkdown(date: startedAt, duration: duration,
                                        cleanedTranscript: result.cleaned_transcript,
-                                       summary: result.summary)
+                                       summary: result.summary.isEmpty ? nil : result.summary)
                 }
 
                 try md.write(to: mdURL, atomically: true, encoding: .utf8)
@@ -174,38 +168,29 @@ class AppState: ObservableObject {
         print("Copied to clipboard (\(text.count) chars)")
         print("AXIsProcessTrusted = \(AXIsProcessTrusted())")
 
-        // Small delay to let the pasteboard settle, then simulate ⌘V
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             let src = CGEventSource(stateID: .combinedSessionState)
 
-            // Key down
             let down = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: true)
             down?.flags = .maskCommand
             down?.post(tap: .cghidEventTap)
 
-            // Brief gap between down/up for the target app to process
             usleep(10_000)  // 10ms
 
-            // Key up
             let up = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: false)
             up?.flags = .maskCommand
             up?.post(tap: .cghidEventTap)
 
-            print("Auto-paste attempted via ⌘V (events created: down=\(down != nil), up=\(up != nil))")
+            print("Auto-paste attempted via ⌘V (events: down=\(down != nil), up=\(up != nil))")
         }
     }
 
     // MARK: - Accessibility
 
-    /// Prompt for Accessibility only on the very first launch.
-    /// Subsequent launches skip the prompt — the TCC entry persists
-    /// even if AXIsProcessTrusted() returns false due to debug-build
-    /// code-signature hash changes.
     private func requestAccessibilityOnce() {
         let key = "hasPromptedAccessibility"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         UserDefaults.standard.set(true, forKey: key)
-
         if !AXIsProcessTrusted() {
             let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
             AXIsProcessTrustedWithOptions(opts)
@@ -218,7 +203,7 @@ class AppState: ObservableObject {
                                cleanedTranscript: String, summary: String?) -> String {
         var sections: [String] = [
             "# Meeting — \(formattedDate(date))",
-            "**Duration:** ~\(max(1, duration)) min  |  **Model:** \(whisperModel)",
+            "**Duration:** ~\(max(1, duration)) min  |  **Model:** Parakeet TDT 0.6B",
         ]
         if let summary { sections += ["", summary] }
         sections += ["", "## Transcript", "", cleanedTranscript]
@@ -230,17 +215,5 @@ class AppState: ObservableObject {
         f.dateStyle = .medium
         f.timeStyle = .short
         return f.string(from: date)
-    }
-
-    // MARK: - Server startup
-
-    private func startServer() async {
-        do {
-            try await server.start()
-            try await server.waitUntilHealthy()
-            status = .ready
-        } catch {
-            status = .error(error.localizedDescription)
-        }
     }
 }
