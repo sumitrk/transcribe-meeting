@@ -53,7 +53,6 @@ struct PTTRecorderView: View {
 
     @State private var isRecording = false
     @State private var keyDownMonitor: Any?
-    @State private var flagsMonitor: Any?
 
     var body: some View {
         Button(isRecording ? "Press key…" : label) {
@@ -72,21 +71,8 @@ struct PTTRecorderView: View {
     private func startRecording() {
         isRecording = true
 
-        // Catch any solo modifier key (Fn, Right Cmd, Right Option, etc.)
-        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
-            let code = Int(event.keyCode)
-            guard pttModifierOnlyKeyCodes.contains(code),
-                  let flag = modifierFlag(for: code),
-                  event.modifierFlags.contains(flag) // key just went DOWN
-            else { return event }
-
-            keyCode = code
-            modifiers = 0
-            stopRecording()
-            return nil
-        }
-
-        // Catch regular modifier+key combos (e.g. ⌥Space)
+        // Only capture modifier+key combos (⌘A, ⌥Space, etc.).
+        // Solo modifier keys (Right ⌘, Fn…) are handled by the preset picker.
         keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 { stopRecording(); return nil } // Escape = cancel
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -103,6 +89,5 @@ struct PTTRecorderView: View {
     private func stopRecording() {
         isRecording = false
         if let m = keyDownMonitor { NSEvent.removeMonitor(m); keyDownMonitor = nil }
-        if let m = flagsMonitor   { NSEvent.removeMonitor(m); flagsMonitor   = nil }
     }
 }
