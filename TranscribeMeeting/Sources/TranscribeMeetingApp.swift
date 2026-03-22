@@ -14,5 +14,9 @@ struct TranscribeMeetingApp: App {
                 .symbolRenderingMode(.hierarchical)
         }
         .menuBarExtraStyle(.menu)
+
+        Settings {
+            SettingsView()
+        }
     }
 }
