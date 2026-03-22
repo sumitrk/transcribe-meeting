@@ -102,7 +102,9 @@ class SettingsStore: ObservableObject {
     // MARK: - Key name helper
 
     func keyLabel(keyCode: Int, modifiers: Int) -> String {
-        if keyCode == 63 && modifiers == 0 { return "Globe / Fn" }
+        // Solo modifier key (Fn, Right ⌘, Right ⌥, etc.)
+        if modifiers == 0, let name = modifierOnlyKeyName(keyCode) { return name }
+        // Regular combo
         let flags = NSEvent.ModifierFlags(rawValue: UInt(modifiers))
         var s = ""
         if flags.contains(.control) { s += "⌃" }

@@ -43,17 +43,17 @@ final class HotkeyManager {
         if let m = pttDownMonitor  { NSEvent.removeMonitor(m); pttDownMonitor  = nil }
         if let m = pttUpMonitor    { NSEvent.removeMonitor(m); pttUpMonitor    = nil }
 
-        if keyCode == 63 {
-            // Fn/Globe — modifier key, tracked via flagsChanged
-            var isFnDown = false
+        if let flag = modifierFlag(for: keyCode) {
+            // Solo modifier key (Fn, Right ⌘, Right ⌥, etc.) — tracked via flagsChanged
+            var isDown = false
             pttFlagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { event in
-                guard event.keyCode == 63 else { return }
-                let nowDown = event.modifierFlags.contains(.function)
-                if nowDown && !isFnDown {
-                    isFnDown = true
+                guard event.keyCode == UInt16(keyCode) else { return }
+                let nowDown = event.modifierFlags.contains(flag)
+                if nowDown && !isDown {
+                    isDown = true
                     Task { @MainActor in onPress() }
-                } else if !nowDown && isFnDown {
-                    isFnDown = false
+                } else if !nowDown && isDown {
+                    isDown = false
                     Task { @MainActor in onRelease() }
                 }
             }

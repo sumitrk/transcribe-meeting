@@ -1,9 +1,51 @@
 import AppKit
 import SwiftUI
 
-/// Key recorder for push-to-talk. Unlike KeyRecorderView it also captures
-/// the Fn/Globe key (keyCode 63), which is a modifier and only appears in
-/// flagsChanged events, not keyDown events.
+/// Modifier-only keys that can be used solo as PTT keys.
+/// All of them fire `flagsChanged`, not `keyDown`.
+let pttModifierOnlyKeyCodes: Set<Int> = [
+    54,  // Right Command
+    55,  // Left Command
+    56,  // Left Shift
+    58,  // Left Option
+    59,  // Left Control
+    60,  // Right Shift
+    61,  // Right Option
+    62,  // Right Control
+    63,  // Fn / Globe
+]
+
+/// Returns the modifier flag that goes up/down when a given modifier keyCode fires.
+func modifierFlag(for keyCode: Int) -> NSEvent.ModifierFlags? {
+    switch keyCode {
+    case 54, 55: return .command
+    case 56, 60: return .shift
+    case 58, 61: return .option
+    case 59, 62: return .control
+    case 63:     return .function
+    default:     return nil
+    }
+}
+
+/// Human-readable name for modifier-only keys.
+func modifierOnlyKeyName(_ keyCode: Int) -> String? {
+    switch keyCode {
+    case 54: return "Right ⌘"
+    case 55: return "Left ⌘"
+    case 56: return "Left ⇧"
+    case 58: return "Left ⌥"
+    case 59: return "Left ⌃"
+    case 60: return "Right ⇧"
+    case 61: return "Right ⌥"
+    case 62: return "Right ⌃"
+    case 63: return "Globe / Fn"
+    default: return nil
+    }
+}
+
+/// Key recorder for push-to-talk.
+/// Accepts solo modifier keys (Right ⌘, Right ⌥, Fn, etc.) via flagsChanged
+/// OR a regular modifier+key combo via keyDown.
 struct PTTRecorderView: View {
     @Binding var keyCode: Int
     @Binding var modifiers: Int
@@ -28,19 +70,21 @@ struct PTTRecorderView: View {
     private func startRecording() {
         isRecording = true
 
-        // Catch Fn/Globe (modifier key — shows up in flagsChanged, not keyDown)
+        // Catch any solo modifier key (Fn, Right Cmd, Right Option, etc.)
         flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
-            guard event.keyCode == 63 else { return event }
-            if event.modifierFlags.contains(.function) {
-                keyCode = 63
-                modifiers = 0
-                stopRecording()
-                return nil
-            }
-            return event
+            let code = Int(event.keyCode)
+            guard pttModifierOnlyKeyCodes.contains(code),
+                  let flag = modifierFlag(for: code),
+                  event.modifierFlags.contains(flag) // key just went DOWN
+            else { return event }
+
+            keyCode = code
+            modifiers = 0
+            stopRecording()
+            return nil
         }
 
-        // Catch any regular modifier+key combo
+        // Catch regular modifier+key combos (e.g. ⌥Space)
         keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 { stopRecording(); return nil } // Escape = cancel
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
