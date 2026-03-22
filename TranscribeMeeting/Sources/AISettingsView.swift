@@ -41,7 +41,7 @@ struct AISettingsView: View {
                 Section {
                     SecureField("Paste your API key…", text: $store.aiApiKey)
                         .textFieldStyle(.roundedBorder)
-                        .onChange(of: store.aiApiKey) { _ in testState = .idle }
+                        .onChange(of: store.aiApiKey) { testState = .idle }
 
                     HStack {
                         Button("Test connection") {
