@@ -24,5 +24,13 @@
     <!-- Permission descriptions (shown in system prompts) -->
     <key>NSMicrophoneUsageDescription</key>
     <string>TranscribeMeeting records your microphone during meetings.</string>
+
+    <!-- Sparkle auto-update -->
+    <key>SUFeedURL</key>
+    <string>https://raw.githubusercontent.com/sumitrk/transcribe-meeting/main/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>RRN4cJZf4vmWZOCv26lN57MjWUABKSkhCtc1P13kTXY=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
 </dict>
 </plist>

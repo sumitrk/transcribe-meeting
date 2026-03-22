@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+    <channel>
+        <title>TranscribeMeeting Updates</title>
+        <link>https://github.com/sumitrk/transcribe-meeting</link>
+        <description>Most recent changes with links to updates.</description>
+        <language>en</language>
+        <!-- Entries are added automatically by distribute.sh -->
+    </channel>
+</rss>
