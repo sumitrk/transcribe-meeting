@@ -48,17 +48,15 @@ class AppState: ObservableObject {
             .sink { [weak self] _, _ in self?.restartToggleHotkey() }
             .store(in: &cancellables)
 
-        // Fn (hold) — push-to-talk: paste only, no markdown
-        hotkey.startPushToTalk(
-            onPress: { [weak self] in
-                guard let self, !self.isRecording else { return }
-                Task { await self.startRecording(mode: .paste) }
-            },
-            onRelease: { [weak self] in
-                guard let self, self.isRecording else { return }
-                Task { await self.stopRecording() }
-            }
-        )
+        // PTT (hold to record)
+        restartPTTHotkey()
+
+        // React to PTT key changes in Settings
+        Publishers.CombineLatest(settings.$pttKeyCode, settings.$pttModifiers)
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _ in self?.restartPTTHotkey() }
+            .store(in: &cancellables)
 
         requestAccessibilityOnce()
     }
@@ -86,6 +84,21 @@ class AppState: ObservableObject {
         hotkey.start(keyCode: settings.toggleKeyCode, modifiers: flags) { [weak self] in
             self?.toggleMarkdown()
         }
+    }
+
+    private func restartPTTHotkey() {
+        let flags = NSEvent.ModifierFlags(rawValue: UInt(settings.pttModifiers))
+        hotkey.startPushToTalk(
+            keyCode: settings.pttKeyCode, modifiers: flags,
+            onPress: { [weak self] in
+                guard let self, !self.isRecording else { return }
+                Task { await self.startRecording(mode: .paste) }
+            },
+            onRelease: { [weak self] in
+                guard let self, self.isRecording else { return }
+                Task { await self.stopRecording() }
+            }
+        )
     }
 
     // MARK: - Toggle (⌘⇧T)

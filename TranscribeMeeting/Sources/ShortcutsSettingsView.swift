@@ -9,18 +9,15 @@ struct ShortcutsSettingsView: View {
             // MARK: Push-to-Talk
             Section {
                 LabeledContent("Key") {
-                    HStack(spacing: 6) {
-                        KeyBadge("Globe")
-                        KeyBadge("Fn")
-                        Text("(fixed)")
-                            .foregroundStyle(.tertiary)
-                            .font(.caption)
-                    }
+                    PTTRecorderView(
+                        keyCode:   $store.pttKeyCode,
+                        modifiers: $store.pttModifiers
+                    )
                 }
             } header: {
                 Text("Push-to-Talk")
             } footer: {
-                Text("Hold the Globe/Fn key to record. Release to transcribe and paste.")
+                Text("Hold \(store.pttKeyLabel) to record. Release to transcribe and paste.")
             }
 
             // MARK: Toggle Record

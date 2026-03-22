@@ -8,32 +8,29 @@ class SettingsStore: ObservableObject {
 
     static let shared = SettingsStore()
 
-    // MARK: - Shortcuts
+    // MARK: - Shortcuts: Push-to-Talk
 
-    /// Push-to-talk is always Fn/Globe (hardware key, not rebindable).
-    let pushToTalkKeyLabel = "Globe / Fn"
+    /// PTT key code (default: 63 = Fn/Globe).
+    @Published var pttKeyCode: Int {
+        didSet { ud.set(pttKeyCode, forKey: Keys.pttKeyCode) }
+    }
+    /// PTT modifier flags (default: 0 — Fn has no modifiers).
+    @Published var pttModifiers: Int {
+        didSet { ud.set(pttModifiers, forKey: Keys.pttModifiers) }
+    }
+    var pttKeyLabel: String { keyLabel(keyCode: pttKeyCode, modifiers: pttModifiers) }
 
-    /// Toggle-record key code (default: 17 = T).
+    // MARK: - Shortcuts: Toggle Record
+
+    /// Toggle key code (default: 17 = T).
     @Published var toggleKeyCode: Int {
         didSet { ud.set(toggleKeyCode, forKey: Keys.toggleKeyCode) }
     }
-
-    /// Toggle-record modifier flags raw value (default: ⌘⇧).
+    /// Toggle modifier flags (default: ⌘⇧).
     @Published var toggleModifiers: Int {
         didSet { ud.set(toggleModifiers, forKey: Keys.toggleModifiers) }
     }
-
-    /// Human-readable label for the current toggle combo, e.g. "⌘⇧T".
-    var toggleKeyLabel: String {
-        let flags = NSEvent.ModifierFlags(rawValue: UInt(toggleModifiers))
-        var s = ""
-        if flags.contains(.control) { s += "⌃" }
-        if flags.contains(.option)  { s += "⌥" }
-        if flags.contains(.shift)   { s += "⇧" }
-        if flags.contains(.command) { s += "⌘" }
-        s += keyCodeName(toggleKeyCode)
-        return s
-    }
+    var toggleKeyLabel: String { keyLabel(keyCode: toggleKeyCode, modifiers: toggleModifiers) }
 
     // MARK: - Toggle Record
 
@@ -96,11 +93,25 @@ class SettingsStore: ObservableObject {
         aiApiKey             = ud.string(forKey: Keys.aiApiKey)   ?? ""
         toggleKeyCode        = (ud.object(forKey: Keys.toggleKeyCode) as? Int) ?? 17
         toggleModifiers      = (ud.object(forKey: Keys.toggleModifiers) as? Int) ?? SettingsStore.defaultModifiers
+        pttKeyCode           = (ud.object(forKey: Keys.pttKeyCode) as? Int) ?? 63
+        pttModifiers         = (ud.object(forKey: Keys.pttModifiers) as? Int) ?? 0
     }
 
     // MARK: - Keys
 
     // MARK: - Key name helper
+
+    func keyLabel(keyCode: Int, modifiers: Int) -> String {
+        if keyCode == 63 && modifiers == 0 { return "Globe / Fn" }
+        let flags = NSEvent.ModifierFlags(rawValue: UInt(modifiers))
+        var s = ""
+        if flags.contains(.control) { s += "⌃" }
+        if flags.contains(.option)  { s += "⌥" }
+        if flags.contains(.shift)   { s += "⇧" }
+        if flags.contains(.command) { s += "⌘" }
+        s += keyCodeName(keyCode)
+        return s
+    }
 
     private func keyCodeName(_ code: Int) -> String {
         let map: [Int: String] = [
@@ -123,5 +134,7 @@ class SettingsStore: ObservableObject {
         static let aiApiKey         = "aiApiKey"
         static let toggleKeyCode    = "toggleKeyCode"
         static let toggleModifiers  = "toggleModifiers"
+        static let pttKeyCode       = "pttKeyCode"
+        static let pttModifiers     = "pttModifiers"
     }
 }

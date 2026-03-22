@@ -3,54 +3,72 @@ import AppKit
 /// Manages two hotkey modes:
 ///
 /// 1. **Toggle** (configurable, default ⌘⇧T): press once to start, press again to stop.
-/// 2. **Push-to-talk** (Fn): hold to record, release to stop.
+/// 2. **Push-to-talk** (configurable, default Fn): hold to record, release to stop.
 ///
-/// Global monitors fire when OTHER apps are active.
-/// Local monitors fire when THIS app is active (e.g. Settings window is open).
-/// Both are registered together so the hotkey works everywhere.
+/// Fn/Globe (keyCode 63) is a modifier key — detected via flagsChanged.
+/// All other keys use keyDown + keyUp global+local monitors.
 final class HotkeyManager {
     private var toggleGlobalMonitor: Any?
-    private var toggleLocalMonitor: Any?
-    private var pttMonitor: Any?
+    private var toggleLocalMonitor:  Any?
+    private var pttFlagsMonitor:     Any?
+    private var pttDownMonitor:      Any?
+    private var pttUpMonitor:        Any?
 
-    // MARK: - Toggle mode (configurable, default ⌘⇧T)
+    // MARK: - Toggle (configurable)
 
     func start(keyCode: Int, modifiers: NSEvent.ModifierFlags,
                onTrigger: @escaping @MainActor () -> Void) {
         if let m = toggleGlobalMonitor { NSEvent.removeMonitor(m); toggleGlobalMonitor = nil }
         if let m = toggleLocalMonitor  { NSEvent.removeMonitor(m); toggleLocalMonitor  = nil }
 
-        // Fires when another app is frontmost
         toggleGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard flags == modifiers, event.keyCode == UInt16(keyCode) else { return }
             Task { @MainActor in onTrigger() }
         }
-
-        // Fires when this app is frontmost (e.g. Settings window focused)
         toggleLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard flags == modifiers, event.keyCode == UInt16(keyCode) else { return event }
             Task { @MainActor in onTrigger() }
-            return nil // consume so the system doesn't beep
+            return nil
         }
     }
 
-    // MARK: - Push-to-talk mode (Fn key, keyCode 63)
+    // MARK: - Push-to-talk (configurable)
 
-    func startPushToTalk(
-        onPress:   @escaping @MainActor () -> Void,
-        onRelease: @escaping @MainActor () -> Void
-    ) {
-        var isFnDown = false
-        pttMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { event in
-            guard event.keyCode == 63 else { return }  // 63 = Fn/Globe key
-            let nowDown = event.modifierFlags.contains(.function)
-            if nowDown && !isFnDown {
-                isFnDown = true
+    func startPushToTalk(keyCode: Int, modifiers: NSEvent.ModifierFlags,
+                         onPress:   @escaping @MainActor () -> Void,
+                         onRelease: @escaping @MainActor () -> Void) {
+        if let m = pttFlagsMonitor { NSEvent.removeMonitor(m); pttFlagsMonitor = nil }
+        if let m = pttDownMonitor  { NSEvent.removeMonitor(m); pttDownMonitor  = nil }
+        if let m = pttUpMonitor    { NSEvent.removeMonitor(m); pttUpMonitor    = nil }
+
+        if keyCode == 63 {
+            // Fn/Globe — modifier key, tracked via flagsChanged
+            var isFnDown = false
+            pttFlagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { event in
+                guard event.keyCode == 63 else { return }
+                let nowDown = event.modifierFlags.contains(.function)
+                if nowDown && !isFnDown {
+                    isFnDown = true
+                    Task { @MainActor in onPress() }
+                } else if !nowDown && isFnDown {
+                    isFnDown = false
+                    Task { @MainActor in onRelease() }
+                }
+            }
+        } else {
+            // Regular key — hold via keyDown + keyUp
+            var isDown = false
+            pttDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+                let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                guard flags == modifiers, event.keyCode == UInt16(keyCode), !isDown else { return }
+                isDown = true
                 Task { @MainActor in onPress() }
-            } else if !nowDown && isFnDown {
-                isFnDown = false
+            }
+            pttUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyUp) { event in
+                guard event.keyCode == UInt16(keyCode), isDown else { return }
+                isDown = false
                 Task { @MainActor in onRelease() }
             }
         }
@@ -59,8 +77,10 @@ final class HotkeyManager {
     // MARK: - Cleanup
 
     func stop() {
-        if let m = toggleGlobalMonitor { NSEvent.removeMonitor(m); toggleGlobalMonitor = nil }
-        if let m = toggleLocalMonitor  { NSEvent.removeMonitor(m); toggleLocalMonitor  = nil }
-        if let m = pttMonitor          { NSEvent.removeMonitor(m); pttMonitor          = nil }
+        [toggleGlobalMonitor, toggleLocalMonitor,
+         pttFlagsMonitor, pttDownMonitor, pttUpMonitor]
+            .compactMap { $0 }.forEach { NSEvent.removeMonitor($0) }
+        toggleGlobalMonitor = nil; toggleLocalMonitor = nil
+        pttFlagsMonitor = nil; pttDownMonitor = nil; pttUpMonitor = nil
     }
 }

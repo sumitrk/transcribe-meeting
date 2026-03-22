@@ -45,5 +45,6 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(width: 620, height: 460)
+        .toolbar(removing: .sidebarToggle)
     }
 }
