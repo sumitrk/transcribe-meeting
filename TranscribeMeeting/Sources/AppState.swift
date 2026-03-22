@@ -95,6 +95,7 @@ class AppState: ObservableObject {
             status = .recording
             recordingStartedAt = Date()
             playSound("Blow")  // start cue
+            if mode == .paste { RecordingIndicatorWindow.shared.show(recorder: recorder) }
         } catch {
             status = .error(error.localizedDescription)
         }
@@ -105,6 +106,7 @@ class AppState: ObservableObject {
         let mode = currentMode
         isRecording = false
         status = .transcribing
+        RecordingIndicatorWindow.shared.hide()
 
         do {
             let wavURL = try await recorder.stopRecording()

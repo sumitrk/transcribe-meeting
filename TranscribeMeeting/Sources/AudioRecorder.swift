@@ -16,6 +16,8 @@ class AudioRecorder: NSObject, ObservableObject {
     // MARK: - State
 
     @Published var isRecording = false
+    /// Normalised microphone RMS level, 0…1. Updated on the main thread ~20× per second.
+    @Published var micLevel: Float = 0
 
     // MARK: - System audio (CATap + aggregate device)
 
@@ -212,6 +214,19 @@ class AudioRecorder: NSObject, ObservableObject {
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFmt) {
             [weak self] buffer, _ in
             guard let self else { return }
+
+            // Compute RMS and publish as micLevel for the waveform indicator.
+            if let ch = buffer.floatChannelData {
+                let frames = Int(buffer.frameLength)
+                let ptr = ch[0]
+                var sum: Float = 0
+                for i in 0..<frames { sum += ptr[i] * ptr[i] }
+                let rms = frames > 0 ? sqrt(sum / Float(frames)) : 0
+                // Scale: typical speech RMS ~0.02–0.1 → map to 0…1 with a 40× gain.
+                let normalised = min(1.0, rms * 40)
+                DispatchQueue.main.async { self.micLevel = normalised }
+            }
+
             let samples = self.convertAndExtract(buffer, from: inputFmt, to: targetFmt)
             self.lock.lock()
             self.micSamples.append(contentsOf: samples)
