@@ -8,11 +8,8 @@ class PythonServer {
     // MARK: - Start
 
     func start() async throws {
-        // If a server is already healthy (e.g. leftover from a previous run), just use it
-        if await isHealthy() {
-            print("PythonServer: server already running on :8765, reusing it")
-            return
-        }
+        // Always kill any leftover process on this port so updated code always loads.
+        killProcessOnPort(8765)
 
         guard let serverScript = findServerScript() else {
             throw ServerError.serverScriptNotFound
@@ -80,6 +77,24 @@ class PythonServer {
         process?.terminate()
         process = nil
         print("PythonServer: stopped")
+    }
+
+    private func killProcessOnPort(_ port: Int) {
+        let lsof = Process()
+        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        lsof.arguments = ["-t", "-i:\(port)"]
+        let pipe = Pipe()
+        lsof.standardOutput = pipe
+        lsof.standardError = Pipe()
+        try? lsof.run()
+        lsof.waitUntilExit()
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        for pidStr in output.components(separatedBy: .newlines) {
+            if let pid = Int32(pidStr.trimmingCharacters(in: .whitespaces)) {
+                kill(pid, SIGTERM)
+                print("PythonServer: killed stale process \(pid) on :\(port)")
+            }
+        }
     }
 
     // MARK: - Path resolution
