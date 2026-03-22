@@ -118,7 +118,9 @@ struct ModelRow: View {
     private var actionView: some View {
         if isDownloading {
             HStack(spacing: 6) {
-                ProgressView().scaleEffect(0.7)
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 16, height: 16)
                 Text("Downloading…").foregroundStyle(.secondary).font(.callout)
             }
         } else if isActive && model.downloaded {
