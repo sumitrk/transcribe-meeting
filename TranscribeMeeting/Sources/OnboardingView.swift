@@ -307,7 +307,11 @@ private struct ModelStep: View {
         req.timeoutInterval = 1200
 
         do {
-            let _ = try await URLSession.shared.data(for: req)
+            let (_, response) = try await URLSession.shared.data(for: req)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                downloadError = "Download failed (server error \(http.statusCode))"
+                return
+            }
             await fetchModels()
             if store.activeModelId.isEmpty || !models.contains(where: { $0.downloaded && $0.id == store.activeModelId }) {
                 store.activeModelId = model.id
