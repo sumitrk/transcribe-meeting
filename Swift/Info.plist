@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>Swift</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.sumitrk.transcribe-meeting</string>
+	<key>CFBundleName</key>
+	<string>Swift</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.4.0</string>
+	<key>CFBundleVersion</key>
+	<string>3</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.2</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>TranscribeMeeting records your microphone during meetings.</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/sumitrk/transcribe-meeting/main/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>RRN4cJZf4vmWZOCv26lN57MjWUABKSkhCtc1P13kTXY=</string>
+</dict>
+</plist>
