@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* Assets.xcassets */; };
 		0BAAD6EA58BAF432A7E4FBAC /* TranscribeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 078C61959EE23AA2D177D0EC /* TranscribeClient.swift */; };
 		0CA143F9429899C52FBEA980 /* PythonServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19D6490C04B4740A610C1E18 /* PythonServer.swift */; };
 		0E354AF200DC5BC5FD6981CA /* RecordingIndicatorWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AB301610DD9A73CD35155F7 /* RecordingIndicatorWindow.swift */; };
@@ -32,6 +33,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B2C3D4E5F6A7B8C9D0E1F2A3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		078C61959EE23AA2D177D0EC /* TranscribeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscribeClient.swift; sourceTree = "<group>"; };
 		19D6490C04B4740A610C1E18 /* PythonServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PythonServer.swift; sourceTree = "<group>"; };
 		1AB301610DD9A73CD35155F7 /* RecordingIndicatorWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingIndicatorWindow.swift; sourceTree = "<group>"; };
@@ -105,10 +107,20 @@
 			path = Whale/Sources;
 			sourceTree = "<group>";
 		};
+		C3D4E5F6A7B8C9D0E1F2A3B5 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				B2C3D4E5F6A7B8C9D0E1F2A3 /* Assets.xcassets */,
+			);
+			name = Resources;
+			path = Whale/Resources;
+			sourceTree = "<group>";
+		};
 		8F2DCE44CE4C7CA0FB04F8BC = {
 			isa = PBXGroup;
 			children = (
 				1FF43984F054E7654B1EEA37 /* Sources */,
+				C3D4E5F6A7B8C9D0E1F2A3B5 /* Resources */,
 				FD08E838474B977A29696F57 /* Frameworks */,
 				1DB310FC63230A872DF63309 /* Products */,
 			);
@@ -131,6 +143,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 735A3DEFC8ED556C33117934 /* Build configuration list for PBXNativeTarget "Swift" */;
 			buildPhases = (
+				C3D4E5F6A7B8C9D0E1F2A3B4 /* Resources */,
 				C9421B68B0297431CB7B7584 /* Sources */,
 				BBEDF9B9D3FBB5E122CFB20D /* Frameworks */,
 				33792503CD20009BBFDA8525 /* Copy Python Server Binary (if built) */,
@@ -183,6 +196,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C3D4E5F6A7B8C9D0E1F2A3B4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
 		33792503CD20009BBFDA8525 /* Copy Python Server Binary (if built) */ = {
