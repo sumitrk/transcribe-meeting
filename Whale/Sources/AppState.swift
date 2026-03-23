@@ -225,6 +225,7 @@ class AppState: ObservableObject {
                 lastMeetingPath = mdURL.path
                 status = .ready
                 playSound("Bottle")
+                try? FileManager.default.removeItem(at: wavURL)
 
                 NSWorkspace.shared.selectFile(mdURL.path, inFileViewerRootedAtPath: "")
             }
