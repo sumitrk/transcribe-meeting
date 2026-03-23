@@ -18,9 +18,19 @@ if [ -z "$SPARKLE_BIN" ]; then
   exit 1
 fi
 
-# ── Version from Info.plist ──────────────────────────────────────────────────
-VERSION=$(defaults read "$(pwd)/TranscribeMeeting/Info.plist" CFBundleShortVersionString)
-BUILD=$(defaults read "$(pwd)/TranscribeMeeting/Info.plist" CFBundleVersion)
+# ── Version bump ─────────────────────────────────────────────────────────────
+CURRENT_VERSION=$(defaults read "$(pwd)/TranscribeMeeting/Info.plist" CFBundleShortVersionString)
+CURRENT_BUILD=$(defaults read "$(pwd)/TranscribeMeeting/Info.plist" CFBundleVersion)
+NEXT_BUILD=$((CURRENT_BUILD + 1))
+
+echo "Current version: ${CURRENT_VERSION} (build ${CURRENT_BUILD})"
+read -rp "New version number (e.g. 0.4.0) [enter to keep ${CURRENT_VERSION}]: " INPUT_VERSION
+VERSION="${INPUT_VERSION:-$CURRENT_VERSION}"
+BUILD=$NEXT_BUILD
+
+# Write back to Info.plist
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" "TranscribeMeeting/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD}" "TranscribeMeeting/Info.plist"
 echo "▶ Building version ${VERSION} (build ${BUILD})"
 
 # ── PyInstaller binary check ─────────────────────────────────────────────────
