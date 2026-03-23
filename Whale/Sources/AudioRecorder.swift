@@ -29,6 +29,10 @@ class AudioRecorder: NSObject, ObservableObject {
     // MARK: - Microphone (AVAudioEngine)
 
     private var micEngine: AVAudioEngine?
+    /// Token returned by the closure-based NotificationCenter API — must be
+    /// stored and used to unregister, because removeObserver(_:name:object:)
+    /// does NOT work with the closure-based registration.
+    private var configChangeObserver: (any NSObjectProtocol)?
 
     // MARK: - Sample buffers (lock-protected)
 
@@ -280,7 +284,8 @@ class AudioRecorder: NSObject, ObservableObject {
 
         // When headphones with a mic are connected/disconnected, AVAudioEngine posts
         // AVAudioEngineConfigurationChange — the engine must be restarted.
-        NotificationCenter.default.addObserver(
+        // Store the token so we can properly remove this observer later.
+        configChangeObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
             object: engine,
             queue: .main
@@ -289,7 +294,23 @@ class AudioRecorder: NSObject, ObservableObject {
             self.micEngine?.inputNode.removeTap(onBus: 0)
             self.micEngine?.stop()
             self.micEngine = nil
-            try? self.startMicCapture()
+            // Remove the observer for the old engine before restarting,
+            // otherwise each restart adds another leaked observer.
+            if let token = self.configChangeObserver {
+                NotificationCenter.default.removeObserver(token)
+                self.configChangeObserver = nil
+            }
+            // Brief delay lets the audio system finish routing to the new device
+            // before we try to start a new engine (important with Google Meet /
+            // any app that also reconfigures audio on the same event).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self, self.isRecording else { return }
+                do {
+                    try self.startMicCapture()
+                } catch {
+                    print("AudioRecorder: mic restart failed after config change: \(error)")
+                }
+            }
         }
 
         try engine.start()
@@ -298,9 +319,9 @@ class AudioRecorder: NSObject, ObservableObject {
     }
 
     private func stopMicCapture() {
-        if let engine = micEngine {
-            NotificationCenter.default.removeObserver(
-                self, name: .AVAudioEngineConfigurationChange, object: engine)
+        if let token = configChangeObserver {
+            NotificationCenter.default.removeObserver(token)
+            configChangeObserver = nil
         }
         micEngine?.inputNode.removeTap(onBus: 0)
         micEngine?.stop()
