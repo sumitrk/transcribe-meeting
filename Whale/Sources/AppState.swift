@@ -34,6 +34,7 @@ class AppState: ObservableObject {
     let recorder = AudioRecorder()
     let client   = TranscribeClient()
     let hotkey   = HotkeyManager()
+    let accessibility: AccessibilityController
 
     private let settings = SettingsStore.shared
     private var cancellables = Set<AnyCancellable>()
@@ -42,34 +43,30 @@ class AppState: ObservableObject {
     private var recordingStartedAt: Date?
     private var currentMode: RecordingMode = .markdown
 
-    init() {
+    init(accessibility: AccessibilityController) {
+        self.accessibility = accessibility
+
         Task { await startServer() }
 
-        // ⌘⇧T (or user-configured combo) — toggle: full markdown pipeline
-        restartToggleHotkey()
-
-        // React to key combo changes in Settings
-        Publishers.CombineLatest(settings.$toggleKeyCode, settings.$toggleModifiers)
+        Publishers.CombineLatest4(
+            settings.$toggleKeyCode,
+            settings.$toggleModifiers,
+            settings.$pttKeyCode,
+            settings.$pttModifiers
+        )
             .dropFirst()
             .receive(on: RunLoop.main)
-            .sink { [weak self] _, _ in self?.restartToggleHotkey() }
+            .sink { [weak self] _, _, _, _ in self?.rebuildHotkeys() }
             .store(in: &cancellables)
 
-        // PTT (hold to record)
-        restartPTTHotkey()
-
-        // React to PTT key changes in Settings
-        Publishers.CombineLatest(settings.$pttKeyCode, settings.$pttModifiers)
-            .dropFirst()
+        accessibility.$isTrusted
+            .removeDuplicates()
             .receive(on: RunLoop.main)
-            .sink { [weak self] _, _ in self?.restartPTTHotkey() }
+            .sink { [weak self] _ in self?.rebuildHotkeys() }
             .store(in: &cancellables)
 
-        // Only auto-prompt accessibility for returning users.
-        // New users get the prompt via the onboarding permissions step.
-        if settings.hasCompletedOnboarding {
-            requestAccessibilityIfNeeded()
-        }
+        accessibility.startMonitoring(promptOnLaunch: settings.hasCompletedOnboarding)
+        rebuildHotkeys()
 
         if !settings.hasCompletedOnboarding {
             Task { @MainActor [weak self] in self?.showOnboardingWindow() }
@@ -84,7 +81,11 @@ class AppState: ObservableObject {
             self?.onboardingWindow?.close()
             self?.onboardingWindow = nil
         }
-        let hosting = NSHostingView(rootView: view.environmentObject(self))
+        let hosting = NSHostingView(
+            rootView: view
+                .environmentObject(self)
+                .environmentObject(accessibility)
+        )
         hosting.frame = NSRect(x: 0, y: 0, width: 540, height: 460)
         let window = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 540, height: 460),
@@ -121,26 +122,50 @@ class AppState: ObservableObject {
 
     // MARK: - Hotkey setup
 
-    private func restartToggleHotkey() {
-        let flags = NSEvent.ModifierFlags(rawValue: UInt(settings.toggleModifiers))
-        hotkey.start(keyCode: settings.toggleKeyCode, modifiers: flags) { [weak self] in
-            self?.toggleMarkdown()
-        }
-    }
+    private func rebuildHotkeys() {
+        let toggleFlags = NSEvent.ModifierFlags(rawValue: UInt(settings.toggleModifiers))
+        let pttFlags = NSEvent.ModifierFlags(rawValue: UInt(settings.pttModifiers))
+        let toggleAction: @MainActor () -> Void
+        let pttPressAction: @MainActor () -> Void
 
-    private func restartPTTHotkey() {
-        let flags = NSEvent.ModifierFlags(rawValue: UInt(settings.pttModifiers))
-        hotkey.startPushToTalk(
-            keyCode: settings.pttKeyCode, modifiers: flags,
-            onPress: { [weak self] in
+        if accessibility.isTrusted {
+            toggleAction = { [weak self] in
+                self?.toggleMarkdown()
+            }
+            pttPressAction = { [weak self] in
                 guard let self, !self.isRecording else { return }
                 Task { await self.startRecording(mode: .paste) }
-            },
-            onRelease: { [weak self] in
+            }
+        } else {
+            toggleAction = { [weak self] in
+                self?.toggleMarkdown()
+            }
+            pttPressAction = { [weak self] in
+                guard let self, !self.isRecording else { return }
+                self.accessibility.refresh()
+                Task { await self.startRecording(mode: .paste) }
+            }
+        }
+
+        hotkey.rebuild(
+            toggleKeyCode: settings.toggleKeyCode,
+            toggleModifiers: toggleFlags,
+            pttKeyCode: settings.pttKeyCode,
+            pttModifiers: pttFlags,
+            mode: .full,
+            onToggle: toggleAction,
+            onPTTPress: pttPressAction,
+            onPTTRelease: { [weak self] in
                 guard let self, self.isRecording else { return }
                 Task { await self.stopRecording() }
             }
         )
+    }
+
+    func startClipboardOnlyDictation() {
+        guard !isRecording else { return }
+        accessibility.refresh()
+        Task { await startRecording(mode: .paste) }
     }
 
     // MARK: - Toggle (⌘⇧T)
@@ -265,7 +290,10 @@ class AppState: ObservableObject {
             // No focused text input — copy to clipboard and nudge the user to paste manually.
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
-            RecordingIndicatorWindow.shared.showHint()
+            let reason: RecordingIndicatorWindow.PasteHintReason = AXIsProcessTrusted()
+                ? .manualPasteOnly
+                : .accessibilityMissing
+            RecordingIndicatorWindow.shared.showHint(reason: reason)
         }
     }
 
@@ -286,20 +314,6 @@ class AppState: ObservableObject {
         ) == .success, let role = roleRef as? String else { return false }
 
         return ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"].contains(role)
-    }
-
-    // MARK: - Accessibility
-
-    /// Prompt for Accessibility permission whenever it is not currently granted.
-    /// Called on every launch so that signature changes (new builds, Sparkle updates,
-    /// notarization changes, Universal Binary migration) or manual revocations are
-    /// detected and re-prompted automatically.
-    /// macOS deduplicates the dialog — if the grant is already valid, nothing is shown.
-    private func requestAccessibilityIfNeeded() {
-        if !AXIsProcessTrusted() {
-            let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            AXIsProcessTrustedWithOptions(opts)
-        }
     }
 
     // MARK: - Markdown builder

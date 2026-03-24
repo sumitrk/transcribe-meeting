@@ -7,6 +7,10 @@ import SwiftUI
 /// Non-activating HUD that floats above all windows near the cursor.
 /// Shows a live audio waveform driven by the microphone RMS level.
 final class RecordingIndicatorWindow: NSPanel {
+    enum PasteHintReason {
+        case manualPasteOnly
+        case accessibilityMissing
+    }
 
     static let shared = RecordingIndicatorWindow()
 
@@ -44,10 +48,10 @@ final class RecordingIndicatorWindow: NSPanel {
         contentView = nil
     }
 
-    /// Show a brief "Copied · ⌘V to paste" nudge near the cursor.
+    /// Show a brief paste/accessibility nudge near the cursor.
     /// Dismissed automatically after 3 seconds.
-    func showHint() {
-        let view = PasteHintView()
+    func showHint(reason: PasteHintReason) {
+        let view = PasteHintView(reason: reason)
         let host = NSHostingView(rootView: view)
         let size = host.fittingSize
         host.frame = NSRect(origin: .zero, size: size)
@@ -174,14 +178,35 @@ private struct RecordingIndicatorView: View {
 /// Shown briefly when auto-paste is not possible (no focused text input).
 /// Lets the user know the transcript is ready on the clipboard.
 private struct PasteHintView: View {
+    let reason: RecordingIndicatorWindow.PasteHintReason
+
     var body: some View {
-        HStack(spacing: 4) {
-            Text("Copied")
-                .foregroundColor(.white.opacity(0.55))
-            Text("·")
-                .foregroundColor(.white.opacity(0.3))
-            Text("⌘V to paste")
-                .foregroundColor(.white)
+        HStack(alignment: .center, spacing: 8) {
+            if reason == .accessibilityMissing {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.yellow)
+                    .font(.system(size: 11, weight: .semibold))
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                switch reason {
+                case .manualPasteOnly:
+                    HStack(spacing: 4) {
+                        Text("Copied")
+                            .foregroundColor(.white.opacity(0.55))
+                        Text("·")
+                            .foregroundColor(.white.opacity(0.3))
+                        Text("⌘V to paste")
+                            .foregroundColor(.white)
+                    }
+
+                case .accessibilityMissing:
+                    Text("No Accessibility permission")
+                        .foregroundColor(.white)
+                    Text("Open Settings to grant access · ⌘V to paste")
+                        .foregroundColor(.white.opacity(0.7))
+                }
+            }
         }
         .font(.system(size: 12, weight: .medium))
         .padding(.horizontal, 12)

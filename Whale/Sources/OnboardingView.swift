@@ -8,12 +8,11 @@ struct OnboardingView: View {
     let onComplete: () -> Void
 
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var accessibility: AccessibilityController
     @State private var step = 0
 
     // Permissions state
     @State private var micStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .audio)
-    @State private var axTrusted: Bool = AXIsProcessTrusted()
-    @State private var axPollTimer: Timer?
 
     // Model state
     @State private var hasModel = false
@@ -25,15 +24,13 @@ struct OnboardingView: View {
 
             bottomBar
         }
-        .onAppear { startAxPolling() }
-        .onDisappear { axPollTimer?.invalidate() }
     }
 
     @ViewBuilder
     private var stepContent: some View {
         switch step {
         case 0: WelcomeStep()
-        case 1: PermissionsStep(micStatus: $micStatus, axTrusted: $axTrusted)
+        case 1: PermissionsStep(micStatus: $micStatus)
         case 2: ModelStep(hasModel: $hasModel)
         case 3: TryItStep(onDone: finish)
         default: EmptyView()
@@ -69,7 +66,7 @@ struct OnboardingView: View {
 
     private var canAdvance: Bool {
         switch step {
-        case 1: return micStatus == .authorized && axTrusted
+        case 1: return micStatus == .authorized && accessibility.isTrusted
         case 2: return hasModel
         default: return true
         }
@@ -78,12 +75,6 @@ struct OnboardingView: View {
     private func finish() {
         SettingsStore.shared.hasCompletedOnboarding = true
         onComplete()
-    }
-
-    private func startAxPolling() {
-        axPollTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            DispatchQueue.main.async { axTrusted = AXIsProcessTrusted() }
-        }
     }
 }
 
@@ -115,7 +106,7 @@ private struct WelcomeStep: View {
 
 private struct PermissionsStep: View {
     @Binding var micStatus: AVAuthorizationStatus
-    @Binding var axTrusted: Bool
+    @EnvironmentObject private var accessibility: AccessibilityController
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
@@ -139,7 +130,7 @@ private struct PermissionsStep: View {
                     icon: "accessibility", color: .blue,
                     title: "Accessibility",
                     description: "To detect the push-to-talk key from any app.",
-                    isGranted: axTrusted,
+                    isGranted: accessibility.isTrusted,
                     onGrant: requestAccessibility
                 )
             }
@@ -158,8 +149,7 @@ private struct PermissionsStep: View {
     }
 
     private func requestAccessibility() {
-        let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
+        accessibility.requestPrompt()
     }
 }
 

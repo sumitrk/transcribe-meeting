@@ -1,5 +1,23 @@
 import SwiftUI
 
+private struct SettingsWindowAccessor: NSViewRepresentable {
+    let onResolve: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            onResolve(view.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            onResolve(nsView.window)
+        }
+    }
+}
+
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general     = "General"
     case shortcuts   = "Shortcuts"
@@ -21,12 +39,12 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 }
 
 struct SettingsView: View {
-    @State private var selection: SettingsSection = .general
+    @EnvironmentObject private var settingsCoordinator: SettingsCoordinator
 
     var body: some View {
         HStack(spacing: 0) {
             // Sidebar — plain List, no NavigationSplitView = no toolbar icon
-            List(SettingsSection.allCases, selection: $selection) { section in
+            List(SettingsSection.allCases, selection: $settingsCoordinator.selection) { section in
                 Label(section.rawValue, systemImage: section.icon)
                     .tag(section)
             }
@@ -37,7 +55,7 @@ struct SettingsView: View {
 
             // Detail panel
             Group {
-                switch selection {
+                switch settingsCoordinator.selection {
                 case .general:     GeneralSettingsView()
                 case .shortcuts:   ShortcutsSettingsView()
                 case .model:       ModelSettingsView()
@@ -48,5 +66,10 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(width: 620, height: 460)
+        .background(
+            SettingsWindowAccessor { window in
+                settingsCoordinator.registerSettingsWindow(window)
+            }
+        )
     }
 }

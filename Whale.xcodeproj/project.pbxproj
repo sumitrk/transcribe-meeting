@@ -11,6 +11,7 @@
 		0BAAD6EA58BAF432A7E4FBAC /* TranscribeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 078C61959EE23AA2D177D0EC /* TranscribeClient.swift */; };
 		0CA143F9429899C52FBEA980 /* PythonServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19D6490C04B4740A610C1E18 /* PythonServer.swift */; };
 		0E354AF200DC5BC5FD6981CA /* RecordingIndicatorWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AB301610DD9A73CD35155F7 /* RecordingIndicatorWindow.swift */; };
+		173C2A9B4D6E8F1029384756 /* AccessibilityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 173C2A9B4D6E8F1029384755 /* AccessibilityController.swift */; };
 		225A0771E3382915CC101010 /* PermissionsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AE0500063A1CAAA7DF39D50 /* PermissionsSettingsView.swift */; };
 		29A65EDEADEA0F1B5158FD69 /* KeyRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E38A11A0F59E213976F5390 /* KeyRecorderView.swift */; };
 		3EF16474D07EFA86261B35A2 /* AISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9765E7786B962732E0D4B5C /* AISettingsView.swift */; };
@@ -27,6 +28,7 @@
 		A5F1E893C1214A87B9A5BDFC /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D46A1ED1172B492709C538FC /* AudioToolbox.framework */; };
 		C6A3D56B2F7023BB00A16DA0 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C6A3D56A2F7023BB00A16DA0 /* Sparkle */; };
 		CCA720AE0BE461180105FE92 /* GeneralSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D450792BC5E0CE42F90269FE /* GeneralSettingsView.swift */; };
+		D4E5F60718293A4B5C6D7E8F /* SettingsCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F60718293A4B5C6D7E8E /* SettingsCoordinator.swift */; };
 		EA62496C0185BEEC105B2E85 /* PTTRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8793309FEF6FE2D71751C324 /* PTTRecorderView.swift */; };
 		EB4DAD4238C1CBE9885299AD /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8416E07055CA131C50C9B6F6 /* SettingsStore.swift */; };
 		F0F812B0EA8E670D04878BDD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EB407F215A4729F95EBD5AA /* SettingsView.swift */; };
@@ -36,6 +38,7 @@
 		B2C3D4E5F6A7B8C9D0E1F2A3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		078C61959EE23AA2D177D0EC /* TranscribeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscribeClient.swift; sourceTree = "<group>"; };
 		19D6490C04B4740A610C1E18 /* PythonServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PythonServer.swift; sourceTree = "<group>"; };
+		173C2A9B4D6E8F1029384755 /* AccessibilityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityController.swift; sourceTree = "<group>"; };
 		1AB301610DD9A73CD35155F7 /* RecordingIndicatorWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingIndicatorWindow.swift; sourceTree = "<group>"; };
 		4ABD2DA0658FF2189FE2CD1C /* ShortcutsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsSettingsView.swift; sourceTree = "<group>"; };
 		4AE0500063A1CAAA7DF39D50 /* PermissionsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsSettingsView.swift; sourceTree = "<group>"; };
@@ -48,6 +51,7 @@
 		A24AEF266FF0BBF055AB8CFB /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
 		B2FDB9E4AEC2578CBCEADEF5 /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
 		C2954E642B3BA0DC9A23C8B0 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
+		D4E5F60718293A4B5C6D7E8E /* SettingsCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsCoordinator.swift; sourceTree = "<group>"; };
 		D450792BC5E0CE42F90269FE /* GeneralSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsView.swift; sourceTree = "<group>"; };
 		D46A1ED1172B492709C538FC /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		D5228B35E5BC11AB86698BDC /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
@@ -84,6 +88,7 @@
 		1FF43984F054E7654B1EEA37 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				173C2A9B4D6E8F1029384755 /* AccessibilityController.swift */,
 				E9765E7786B962732E0D4B5C /* AISettingsView.swift */,
 				D5228B35E5BC11AB86698BDC /* AppState.swift */,
 				A24AEF266FF0BBF055AB8CFB /* AudioRecorder.swift */,
@@ -97,6 +102,7 @@
 				8793309FEF6FE2D71751C324 /* PTTRecorderView.swift */,
 				19D6490C04B4740A610C1E18 /* PythonServer.swift */,
 				1AB301610DD9A73CD35155F7 /* RecordingIndicatorWindow.swift */,
+				D4E5F60718293A4B5C6D7E8E /* SettingsCoordinator.swift */,
 				8416E07055CA131C50C9B6F6 /* SettingsStore.swift */,
 				5EB407F215A4729F95EBD5AA /* SettingsView.swift */,
 				4ABD2DA0658FF2189FE2CD1C /* ShortcutsSettingsView.swift */,
@@ -235,6 +241,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				3EF16474D07EFA86261B35A2 /* AISettingsView.swift in Sources */,
+				173C2A9B4D6E8F1029384756 /* AccessibilityController.swift in Sources */,
 				89E3B9353ADD0FFF6610144B /* AppState.swift in Sources */,
 				700DD29FBEB9B95443CCDCEA /* AudioRecorder.swift in Sources */,
 				CCA720AE0BE461180105FE92 /* GeneralSettingsView.swift in Sources */,
@@ -247,6 +254,7 @@
 				225A0771E3382915CC101010 /* PermissionsSettingsView.swift in Sources */,
 				0CA143F9429899C52FBEA980 /* PythonServer.swift in Sources */,
 				0E354AF200DC5BC5FD6981CA /* RecordingIndicatorWindow.swift in Sources */,
+				D4E5F60718293A4B5C6D7E8F /* SettingsCoordinator.swift in Sources */,
 				EB4DAD4238C1CBE9885299AD /* SettingsStore.swift in Sources */,
 				F0F812B0EA8E670D04878BDD /* SettingsView.swift in Sources */,
 				94E2FF4554D92D4265DAFE60 /* ShortcutsSettingsView.swift in Sources */,

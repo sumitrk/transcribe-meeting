@@ -2,11 +2,39 @@ import SwiftUI
 import Sparkle
 
 struct MenuBarView: View {
-    @EnvironmentObject var appState: AppState
     @Environment(\.openSettings) private var openSettings
+    @EnvironmentObject var appState: AppState
+    @EnvironmentObject private var accessibility: AccessibilityController
+    @EnvironmentObject private var settingsCoordinator: SettingsCoordinator
     let updater: SPUUpdater
 
     var body: some View {
+        if !accessibility.isTrusted {
+            Text("Accessibility permission required. Global shortcuts and auto-paste are disabled.")
+                .font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if appState.isRecording {
+                Button("Stop Dictation") {
+                    Task { await appState.stopRecording() }
+                }
+            } else {
+                Button("Start Dictation (Clipboard Only)") {
+                    appState.startClipboardOnlyDictation()
+                }
+            }
+
+            Button("Open Permissions") {
+                openSettingsWindow(section: .permissions)
+            }
+
+            Button("Re-check") {
+                accessibility.refresh()
+            }
+
+            Divider()
+        }
+
         Button("Check for Updates…") {
             updater.checkForUpdates()
         }
@@ -15,8 +43,7 @@ struct MenuBarView: View {
         Divider()
 
         Button("Settings…") {
-            NSApp.activate(ignoringOtherApps: true)
-            openSettings()
+            openSettingsWindow(section: settingsCoordinator.selection)
         }
         .keyboardShortcut(",", modifiers: .command)
 
@@ -25,5 +52,17 @@ struct MenuBarView: View {
             NSApplication.shared.terminate(nil)
         }
         .keyboardShortcut("q", modifiers: .command)
+        
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onAppear {
+                accessibility.refresh()
+            }
+    }
+
+    private func openSettingsWindow(section: SettingsSection) {
+        if !settingsCoordinator.focus(section: section) {
+            openSettings()
+        }
     }
 }
