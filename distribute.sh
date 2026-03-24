@@ -3,7 +3,7 @@
 set -e
 
 APP_NAME="Whale"
-SCHEME="TranscribeMeeting"
+SCHEME="Whale"
 ENTITLEMENTS="Whale/TranscribeMeeting.entitlements"
 DERIVED_DATA="build/xcode"
 DIST_DIR="build/dist_staging"
@@ -43,10 +43,18 @@ if [ ! -d "dist/transcribe_server" ]; then
 fi
 echo "✅ PyInstaller binary found"
 
+# ── Fix stale SourcePackages paths (project may have been moved) ─────────────
+WS_STATE="${DERIVED_DATA}/SourcePackages/workspace-state.json"
+if [ -f "$WS_STATE" ]; then
+  PROJECT_DIR="$(pwd)"
+  sed -i '' "s|\"path\" : \"[^\"]*/${DERIVED_DATA}/|\"path\" : \"${PROJECT_DIR}/${DERIVED_DATA}/|g" "$WS_STATE" 2>/dev/null || true
+fi
+
 # ── Build ────────────────────────────────────────────────────────────────────
 echo ""
 echo "▶ Building Xcode project (Release, ad-hoc signed)..."
 xcodebuild \
+  -project Whale.xcodeproj \
   -scheme "$SCHEME" \
   -configuration Release \
   -derivedDataPath "$DERIVED_DATA" \
@@ -70,12 +78,35 @@ cp -r "dist/transcribe_server" "$APP_PATH/Contents/Resources/"
 echo "✅ Server binary bundled"
 
 # ── Ad-hoc sign ──────────────────────────────────────────────────────────────
+# Must sign inside-out: nested bundles first, then frameworks, then the app.
+# --deep is intentionally avoided — it mishandles Sparkle's nested Updater.app
+# and XPC services, producing an "ambiguous bundle" rejection from codesign.
 echo ""
 echo "▶ Ad-hoc signing..."
-find "$APP_PATH/Contents" -type f \( -name "*.dylib" -o -name "*.so" -o -perm +111 \) | while read f; do
+
+SPARKLE="$APP_PATH/Contents/Frameworks/Sparkle.framework/Versions/B"
+
+# 1. Sign loose dylibs and .so files (PyInstaller server binary etc.)
+find "$APP_PATH/Contents" -type f \( -name "*.dylib" -o -name "*.so" \) | while read f; do
   codesign --force --sign - "$f" 2>/dev/null || true
 done
-codesign --deep --force --sign - --entitlements "$ENTITLEMENTS" "$APP_PATH"
+
+# 2. Sign Sparkle's XPC services (innermost)
+for xpc in "$SPARKLE/XPCServices/"*.xpc; do
+  [ -d "$xpc" ] && codesign --force --sign - "$xpc"
+done
+
+# 3. Sign Sparkle's nested Updater.app
+[ -d "$SPARKLE/Updater.app" ] && codesign --force --sign - "$SPARKLE/Updater.app"
+
+# 4. Sign the Sparkle framework itself
+codesign --force --sign - "$APP_PATH/Contents/Frameworks/Sparkle.framework"
+
+# 5. Sign the top-level app bundle with entitlements
+codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_PATH"
+
+# Verify the signature is valid before packaging
+codesign -vvv "$APP_PATH" 2>&1 | tail -3
 echo "✅ Ad-hoc signed"
 
 # ── Create DMG ───────────────────────────────────────────────────────────────
