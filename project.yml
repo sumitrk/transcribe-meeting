@@ -1,3 +1,7 @@
+#
+# Legacy XcodeGen config kept only as reference while the checked-in Xcode
+# project remains the canonical build/signing source of truth.
+#
 name: TranscribeMeeting
 options:
   bundleIdPrefix: com.sumitrk
@@ -12,7 +16,6 @@ settings:
     MACOSX_DEPLOYMENT_TARGET: "14.2"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: "G6Z6DNHM33"
-    OTHER_CODE_SIGN_FLAGS: '--requirements "=designated => identifier \"com.sumitrk.transcribe-meeting\" and anchor apple generic and certificate leaf[subject.OU] = \"G6Z6DNHM33\""'
 
 targets:
   TranscribeMeeting:
@@ -43,6 +46,12 @@ targets:
             rm -rf "$DEST"
             mkdir -p "$(dirname "$DEST")"
             cp -r "$BINARY_DIR" "$DEST"
+            INTERNAL_DIR="$DEST/_internal"
+            METALLIB_LINK="$INTERNAL_DIR/mlx.metallib"
+            METALLIB_TARGET="mlx/lib/mlx.metallib"
+            if [ -f "$INTERNAL_DIR/$METALLIB_TARGET" ] && [ ! -e "$METALLIB_LINK" ]; then
+              ln -s "$METALLIB_TARGET" "$METALLIB_LINK"
+            fi
           else
             echo "No dist/transcribe_server found — app will use Python fallback (dev mode)"
           fi
