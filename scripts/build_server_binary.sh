@@ -14,7 +14,16 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "==> Building Python server binary with PyInstaller..."
-uv run pyinstaller server.spec --clean --noconfirm
+uv run --group dev python -m PyInstaller server.spec --clean --noconfirm
+
+INTERNAL_DIR="dist/transcribe_server/_internal"
+METALLIB_LINK="$INTERNAL_DIR/mlx.metallib"
+METALLIB_TARGET="mlx/lib/mlx.metallib"
+
+if [ -f "$INTERNAL_DIR/$METALLIB_TARGET" ] && [ ! -e "$METALLIB_LINK" ]; then
+  echo "==> Adding build-time mlx.metallib symlink..."
+  ln -s "$METALLIB_TARGET" "$METALLIB_LINK"
+fi
 
 echo ""
 echo "==> Done! Binary at: dist/transcribe_server/transcribe_server"

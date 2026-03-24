@@ -35,15 +35,13 @@ for pkg in COLLECT_ALL:
     hiddenimports += h
 
 # collect_all('mlx') misses the compiled Metal shader library.
-# MLX looks for mlx.metallib relative to its own package path, so the
-# destination must be mlx/lib/ inside the bundle.
+# We still bundle it into mlx/lib/ so the package layout is complete, then the
+# app packaging step adds a signed symlink at _internal/mlx.metallib before the
+# final app signature is applied.
 import mlx.core as _mlx_core
 _mlx_dir = os.path.dirname(os.path.dirname(_mlx_core.__file__))  # mlx/core.so -> mlx/
 _metallib = os.path.join(_mlx_dir, "lib", "mlx.metallib")
 if os.path.exists(_metallib):
-    # mlx uses dladdr() on libmlx.dylib to find the metallib — it looks in the
-    # SAME directory as libmlx.dylib, which PyInstaller places at _internal/.
-    # So the metallib must land at _internal/mlx.metallib, not _internal/mlx/lib/.
     datas.append((_metallib, "mlx/lib"))
 
 # uvicorn dynamically imports its loop/protocol backends
@@ -69,7 +67,6 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=["runtime_hooks/hook_mlx_metallib.py"],
     excludes=[
         "tkinter", "matplotlib", "PIL", "cv2",
         "IPython", "jupyter", "notebook",
