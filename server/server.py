@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import tempfile  # used for temp WAV files in /transcribe
 import threading
 import time
@@ -14,10 +15,11 @@ os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from huggingface_hub import snapshot_download
 from pydantic import BaseModel
 
 from llm import LLMResult, process_transcript
-from transcriber import transcribe_chunks
+from transcriber import DEFAULT_MODEL, ModelNotReadyError, is_model_downloaded, transcribe_chunks
 
 app = FastAPI(title="TranscribeMeeting Server", version="1.0.0")
 
@@ -34,8 +36,17 @@ def health():
 @app.post("/transcribe")
 async def transcribe(
     file: UploadFile = File(...),
+    model: str = Form(DEFAULT_MODEL),
 ):
-    """Receive a WAV file, return the transcript via Parakeet."""
+    """Receive a WAV file, return the transcript for the requested local model."""
+    if not _get_model_info(model):
+        raise HTTPException(status_code=404, detail="Model not found")
+    if not is_model_downloaded(model):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Model '{model}' is not fully downloaded. Open Settings > Model and download it again.",
+        )
+
     suffix = Path(file.filename or "audio.wav").suffix or ".wav"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         content = await file.read()
@@ -43,13 +54,15 @@ async def transcribe(
         tmp_path = Path(tmp.name)
 
     try:
-        transcript = transcribe_chunks([tmp_path])
+        transcript = transcribe_chunks([tmp_path], model=model)
+    except ModelNotReadyError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         tmp_path.unlink(missing_ok=True)
 
-    return {"transcript": transcript, "model": "mlx-community/parakeet-tdt-0.6b-v3"}
+    return {"transcript": transcript, "model": model}
 
 
 # ── Summarise ──────────────────────────────────────────────────────────────────
@@ -78,8 +91,6 @@ def summarise(req: SummariseRequest):
 
 # ── Models ─────────────────────────────────────────────────────────────────────
 
-DEFAULT_MODEL = "mlx-community/whisper-large-v3-turbo"
-
 AVAILABLE_MODELS = [
     {"id": "mlx-community/parakeet-tdt-0.6b-v3",  "label": "Parakeet 0.6B (English only, fastest)", "size_mb": 600},
     {"id": "mlx-community/whisper-large-v3-turbo", "label": "Whisper Large v3 Turbo (multilingual)", "size_mb": 809},
@@ -92,32 +103,45 @@ _HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
 _download_progress: dict[str, dict] = {}
 
 
+def _get_model_info(model_id: str):
+    return next((m for m in AVAILABLE_MODELS if m["id"] == model_id), None)
+
+
+def _cleanup_partial_download(model_id: str):
+    cache_key = "models--" + model_id.replace("/", "--")
+    shutil.rmtree(_HF_CACHE / cache_key, ignore_errors=True)
+    shutil.rmtree(_HF_CACHE / ".locks" / cache_key, ignore_errors=True)
+
+
 @app.get("/models")
 def list_models():
     """List available models and whether they are already downloaded."""
     result = []
     for m in AVAILABLE_MODELS:
-        cache_name = "models--" + m["id"].replace("/", "--")
-        downloaded = (_HF_CACHE / cache_name).exists()
-        result.append({**m, "downloaded": downloaded})
+        result.append({**m, "downloaded": is_model_downloaded(m["id"])})
     return {"models": result}
 
 
 @app.post("/models/download")
 async def download_model(model_id: str = Form(...)):
     """Download a model from HuggingFace. Streams progress via /models/download-progress."""
-    model_info = next((m for m in AVAILABLE_MODELS if m["id"] == model_id), None)
+    model_info = _get_model_info(model_id)
     if not model_info:
         raise HTTPException(status_code=404, detail="Model not found")
 
     total_mb = model_info["size_mb"]
+    if not is_model_downloaded(model_id):
+        _cleanup_partial_download(model_id)
     _download_progress[model_id] = {"downloaded_mb": 0.0, "total_mb": total_mb, "done": False, "error": None}
 
     # Track progress by watching the HuggingFace cache directory size
     def track():
         cache_key = "models--" + model_id.replace("/", "--")
         cache_path = _HF_CACHE / cache_key
-        while not _download_progress[model_id]["done"]:
+        while True:
+            info = _download_progress.get(model_id)
+            if info is None or info["done"]:
+                return
             if cache_path.exists():
                 try:
                     # Includes .incomplete files that grow during download
@@ -126,7 +150,7 @@ async def download_model(model_id: str = Form(...)):
                     # always 100% from the start.
                     written = sum(f.stat().st_blocks * 512 for f in cache_path.rglob("*") if f.is_file())
                     if written > 0:
-                        _download_progress[model_id]["downloaded_mb"] = min(written / (1024 * 1024), total_mb)
+                        info["downloaded_mb"] = min(written / (1024 * 1024), total_mb)
                 except Exception:
                     pass
             time.sleep(0.5)
@@ -135,12 +159,16 @@ async def download_model(model_id: str = Form(...)):
     tracker.start()
 
     try:
-        from huggingface_hub import snapshot_download
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, lambda: snapshot_download(repo_id=model_id))
+        if not is_model_downloaded(model_id):
+            raise RuntimeError("Model download did not produce a usable local cache.")
         _download_progress[model_id].update({"downloaded_mb": float(total_mb), "done": True})
     except Exception as e:
-        _download_progress[model_id].update({"done": True, "error": str(e)})
+        if model_id in _download_progress:
+            _download_progress[model_id].update({"done": True, "error": str(e)})
+        _cleanup_partial_download(model_id)
+        _download_progress.pop(model_id, None)
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"status": "ok", "model_id": model_id}

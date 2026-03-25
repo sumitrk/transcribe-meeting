@@ -33,7 +33,7 @@ struct TranscribeClient {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            let msg = String(data: data, encoding: .utf8) ?? "unknown error"
+            let msg = decodeServerError(from: data)
             throw ClientError.serverError(msg)
         }
 
@@ -56,17 +56,25 @@ struct TranscribeClient {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            let msg = String(data: data, encoding: .utf8) ?? "unknown error"
+            let msg = decodeServerError(from: data)
             throw ClientError.serverError(msg)
         }
 
         return try JSONDecoder().decode(SummariseResponse.self, from: data)
+    }
+
+    private func decodeServerError(from data: Data) -> String {
+        if let payload = try? JSONDecoder().decode(ServerErrorPayload.self, from: data) {
+            return payload.detail
+        }
+        return String(data: data, encoding: .utf8) ?? "unknown error"
     }
 }
 
 // MARK: - Codable types
 
 private struct TranscribeResponse: Decodable { let transcript: String }
+private struct ServerErrorPayload: Decodable { let detail: String }
 
 private struct SummariseRequest: Encodable {
     let transcript: String

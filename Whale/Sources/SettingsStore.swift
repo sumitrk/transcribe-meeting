@@ -92,7 +92,7 @@ class SettingsStore: ObservableObject {
 
     private init() {
         transcriptFolderPath     = ud.string(forKey: Keys.transcriptFolder) ?? ""
-        activeModelId            = ud.string(forKey: Keys.activeModel)      ?? "mlx-community/parakeet-tdt-0.6b-v3"
+        activeModelId            = ud.string(forKey: Keys.activeModel)      ?? ""
         hasCompletedOnboarding   = ud.bool(forKey: Keys.hasCompletedOnboarding)
         launchAtLogin            = ud.bool(forKey: Keys.launchAtLogin)
         aiEnabled                = ud.bool(forKey: Keys.aiEnabled)
@@ -102,6 +102,25 @@ class SettingsStore: ObservableObject {
         toggleModifiers          = (ud.object(forKey: Keys.toggleModifiers) as? Int) ?? SettingsStore.defaultModifiers
         pttKeyCode               = (ud.object(forKey: Keys.pttKeyCode) as? Int) ?? 63
         pttModifiers             = (ud.object(forKey: Keys.pttModifiers) as? Int) ?? 0
+    }
+
+    @discardableResult
+    func reconcileActiveModel(downloadedModelIds: [String]) -> String {
+        if !activeModelId.isEmpty, downloadedModelIds.contains(activeModelId) {
+            return activeModelId
+        }
+
+        if let fallback = downloadedModelIds.first {
+            if activeModelId != fallback {
+                activeModelId = fallback
+            }
+            return fallback
+        }
+
+        if !activeModelId.isEmpty {
+            activeModelId = ""
+        }
+        return ""
     }
 
     // MARK: - Key name helper
