@@ -2,34 +2,56 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from huggingface_hub import snapshot_download
+from huggingface_hub.errors import LocalEntryNotFoundError
 from mlx_audio.stt.utils import load_model as load_stt
 
-_HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
+DEFAULT_MODEL = "mlx-community/parakeet-tdt-0.6b-v3"
 
-# Parakeet model — cached after first download (~600 MB)
-_PARAKEET_REPO = "mlx-community/parakeet-tdt-0.6b-v3"
-
-# Module-level model cache so we only load once per server process
-_model = None
+# Module-level model cache so we only load each resolved model once per server process
+_models: dict[str, object] = {}
 
 
-def _get_model():
-    global _model
-    if _model is None:
-        if not _model_is_cached(_PARAKEET_REPO):
-            print(f"First run: downloading Parakeet model (~600 MB)...", flush=True)
-            print("This may take a few minutes.", flush=True)
-        print(f"Loading Parakeet STT model...", flush=True)
-        _model = load_stt(_PARAKEET_REPO)
-    return _model
+class ModelNotReadyError(RuntimeError):
+    pass
 
 
-def _model_is_cached(model_repo: str) -> bool:
-    cache_name = "models--" + model_repo.replace("/", "--")
-    return (_HF_CACHE / cache_name).exists()
+def _resolve_cached_model_path(model_repo: str) -> Path | None:
+    try:
+        model_path = Path(snapshot_download(repo_id=model_repo, local_files_only=True))
+    except LocalEntryNotFoundError:
+        return None
+
+    if not model_path.exists():
+        return None
+
+    has_weights = any(model_path.glob("*.safetensors"))
+    has_config = any(model_path.glob("*.json"))
+    return model_path if has_weights and has_config else None
 
 
-def transcribe_chunks(chunk_paths: list[Path], model: str = _PARAKEET_REPO) -> str:
+def is_model_downloaded(model_repo: str) -> bool:
+    return _resolve_cached_model_path(model_repo) is not None
+
+
+def _require_cached_model_path(model_repo: str) -> Path:
+    model_path = _resolve_cached_model_path(model_repo)
+    if model_path is None:
+        raise ModelNotReadyError(
+            f"Model '{model_repo}' is not fully downloaded. Open Settings > Model and download it again."
+        )
+    return model_path
+
+
+def _get_model(model_repo: str):
+    if model_repo not in _models:
+        model_path = _require_cached_model_path(model_repo)
+        print(f"Loading STT model: {model_repo}", flush=True)
+        _models[model_repo] = load_stt(str(model_path))
+    return _models[model_repo]
+
+
+def transcribe_chunks(chunk_paths: list[Path], model: str = DEFAULT_MODEL) -> str:
     """
     Transcribe a list of WAV chunk files using Parakeet via mlx-audio.
     Returns the concatenated transcript string.
@@ -37,7 +59,7 @@ def transcribe_chunks(chunk_paths: list[Path], model: str = _PARAKEET_REPO) -> s
     if not chunk_paths:
         return ""
 
-    stt = _get_model()
+    stt = _get_model(model)
     total = len(chunk_paths)
     texts: list[str] = []
 

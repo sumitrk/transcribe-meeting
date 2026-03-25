@@ -182,6 +182,11 @@ class AppState: ObservableObject {
     // MARK: - Recording core
 
     fileprivate func startRecording(mode: RecordingMode) async {
+        guard !settings.activeModelId.isEmpty else {
+            status = .error("No transcription model is installed. Open Settings > Model and download one.")
+            return
+        }
+
         do {
             currentMode = mode
             try await recorder.startRecording(captureSystemAudio: mode == .markdown)
@@ -342,9 +347,20 @@ class AppState: ObservableObject {
         do {
             try await server.start()
             try await server.waitUntilHealthy()
+            await refreshModelSelection()
             status = .ready
         } catch {
             status = .error(error.localizedDescription)
+        }
+    }
+
+    private func refreshModelSelection() async {
+        do {
+            let models = try await ModelService.fetchModels()
+            let downloadedIds = models.filter { $0.downloaded }.map { $0.id }
+            settings.reconcileActiveModel(downloadedModelIds: downloadedIds)
+        } catch {
+            print("Model refresh skipped: \(error.localizedDescription)")
         }
     }
 }

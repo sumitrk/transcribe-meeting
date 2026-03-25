@@ -200,8 +200,8 @@ private struct ModelStep: View {
     @State private var models: [ModelInfo] = []
     @State private var downloading: Set<String> = []
     @State private var downloadProgress: [String: Double] = [:]
-    @State private var serverReady = false
-    @State private var downloadError: String?
+    @State private var error: String?
+    @State private var isLoading = true
     @State private var pollTimer: Timer?
 
     var body: some View {
@@ -216,23 +216,41 @@ private struct ModelStep: View {
             .padding(.horizontal, 28)
             .padding(.top, 28)
 
-            if let downloadError {
-                Text(downloadError)
-                    .foregroundStyle(.red)
-                    .font(.caption)
-                    .padding(.horizontal, 28)
+            if let error, !models.isEmpty {
+                ModelStatusCard(
+                    title: "Model issue",
+                    message: error,
+                    buttonTitle: "Retry",
+                    action: { Task { await fetchModels() } }
+                )
+                .padding(.horizontal, 28)
             }
 
-            if !serverReady {
-                // Server still starting — show a friendly wait state
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("Starting transcription server…")
-                        .foregroundStyle(.secondary)
-                        .font(.callout)
-                }
+            if isLoading && models.isEmpty {
+                ModelStatusCard(
+                    title: "Starting transcription server…",
+                    message: "Checking which models are fully available on this Mac."
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 28)
+            } else if models.isEmpty {
+                ModelStatusCard(
+                    title: error == nil ? "No models available" : "Could not load models",
+                    message: error ?? "Retry once the transcription server is ready.",
+                    buttonTitle: "Retry",
+                    action: { Task { await fetchModels() } }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 28)
             } else {
+                if !models.contains(where: { $0.downloaded }) {
+                    ModelStatusCard(
+                        title: "Download one model to continue",
+                        message: "Only fully completed downloads unlock onboarding. Interrupted downloads stay inactive until they finish cleanly."
+                    )
+                    .padding(.horizontal, 28)
+                }
+
                 List(models) { model in
                     ModelRow(
                         model:            model,
@@ -259,19 +277,23 @@ private struct ModelStep: View {
     }
 
     private func fetchModels() async {
-        do {
-            let (data, _) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:8765/models")!)
-            let resp = try JSONDecoder().decode(ModelsResponse.self, from: data)
-            serverReady = true
-            models = resp.models
-            // Only unlock Continue when no download is in progress
-            // (the cache dir is created immediately so downloaded=true too early)
-            if downloading.isEmpty {
-                hasModel = models.contains { $0.downloaded }
-            }
-        } catch {
-            serverReady = false
+        if models.isEmpty {
+            isLoading = true
         }
+
+        do {
+            let fetched = try await ModelService.fetchModels()
+            models = fetched
+            error = nil
+            let downloadedIds = fetched.filter { $0.downloaded }.map { $0.id }
+            store.reconcileActiveModel(downloadedModelIds: downloadedIds)
+            hasModel = !downloadedIds.isEmpty
+        } catch {
+            self.error = error.localizedDescription
+            hasModel = false
+        }
+
+        isLoading = false
     }
 
     private func download(_ model: ModelInfo) async {
@@ -284,48 +306,25 @@ private struct ModelStep: View {
         // Poll progress while download is in-flight
         let pollTask = Task {
             while !Task.isCancelled {
-                await fetchDownloadProgress(for: model.id)
+                if let progress = await ModelService.fetchDownloadProgress(for: model.id) {
+                    await MainActor.run {
+                        downloadProgress[model.id] = progress
+                    }
+                }
                 try? await Task.sleep(nanoseconds: 800_000_000)
             }
         }
         defer { pollTask.cancel() }
 
-        var req = URLRequest(url: URL(string: "http://127.0.0.1:8765/models/download")!)
-        req.httpMethod = "POST"
-        let boundary = UUID().uuidString
-        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        var body = Data()
-        body.appendField("model_id", value: model.id, boundary: boundary)
-        req.httpBody = body
-        req.timeoutInterval = 1200
-
         do {
-            let (_, response) = try await URLSession.shared.data(for: req)
-            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                downloadError = "\(model.label) failed to download — try restarting the app (error \(http.statusCode))"
-                return
-            }
+            try await ModelService.download(model)
             await fetchModels()
-            hasModel = true  // unlock Continue only after full download completes
-            if store.activeModelId.isEmpty || !models.contains(where: { $0.downloaded && $0.id == store.activeModelId }) {
-                store.activeModelId = model.id
-            }
         } catch {
-            downloadError = "Download failed: \(error.localizedDescription)"
+            self.error = "\(model.label) failed to download. \(error.localizedDescription)"
+            await fetchModels()
         }
     }
-
-    private func fetchDownloadProgress(for modelId: String) async {
-        let encoded = modelId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? modelId
-        guard let url = URL(string: "http://127.0.0.1:8765/models/download-progress?model_id=\(encoded)") else { return }
-        struct Resp: Decodable { let percent: Double }
-        guard let (data, _) = try? await URLSession.shared.data(from: url),
-              let resp = try? JSONDecoder().decode(Resp.self, from: data) else { return }
-        if resp.percent > 0.01 { downloadProgress[modelId] = resp.percent }
-    }
 }
-
-private struct ModelsResponse: Decodable { let models: [ModelInfo] }
 
 // MARK: - Step 3: Configure & Try
 
