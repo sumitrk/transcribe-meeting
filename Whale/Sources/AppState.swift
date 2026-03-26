@@ -41,9 +41,14 @@ class AppState: ObservableObject {
 
     private var recordingStartedAt: Date?
     private var currentMode: RecordingMode = .markdown
+    private var isPTTArming = false
+    private var stopPTTAfterStart = false
 
     init(accessibility: AccessibilityController) {
         self.accessibility = accessibility
+        recorder.onRecordingReady = { [weak self] in
+            self?.handleRecorderReady()
+        }
 
         Task { await prepareApp() }
 
@@ -131,7 +136,7 @@ class AppState: ObservableObject {
                 self?.toggleMarkdown()
             }
             pttPressAction = { [weak self] in
-                guard let self, !self.isRecording else { return }
+                guard let self, !self.isRecording, !self.isPTTArming else { return }
                 Task { await self.startRecording(mode: .paste) }
             }
         } else {
@@ -139,7 +144,7 @@ class AppState: ObservableObject {
                 self?.toggleMarkdown()
             }
             pttPressAction = { [weak self] in
-                guard let self, !self.isRecording else { return }
+                guard let self, !self.isRecording, !self.isPTTArming else { return }
                 self.accessibility.refresh()
                 Task { await self.startRecording(mode: .paste) }
             }
@@ -154,14 +159,36 @@ class AppState: ObservableObject {
             onToggle: toggleAction,
             onPTTPress: pttPressAction,
             onPTTRelease: { [weak self] in
-                guard let self, self.isRecording else { return }
+                guard let self else { return }
+                if self.isPTTArming {
+                    self.stopPTTAfterStart = true
+                    if self.recorder.isRecording {
+                        Task { await self.stopRecording() }
+                    }
+                    return
+                }
+                guard self.isRecording else { return }
                 Task { await self.stopRecording() }
             }
         )
     }
 
+    private func handleRecorderReady() {
+        guard currentMode == .paste, isPTTArming else { return }
+        if stopPTTAfterStart {
+            stopPTTAfterStart = false
+            Task { await self.stopRecording() }
+            return
+        }
+        isPTTArming = false
+        isRecording = true
+        status = .recording
+        recordingStartedAt = Date()
+        playSound("Blow")
+    }
+
     func startClipboardOnlyDictation() {
-        guard !isRecording else { return }
+        guard !isRecording, !isPTTArming else { return }
         accessibility.refresh()
         Task { await startRecording(mode: .paste) }
     }
@@ -180,20 +207,43 @@ class AppState: ObservableObject {
     // MARK: - Recording core
 
     fileprivate func startRecording(mode: RecordingMode) async {
+        let isDictation = mode == .paste
+        if isDictation {
+            isPTTArming = true
+            stopPTTAfterStart = false
+            recordingStartedAt = nil
+        }
+
         do {
             guard try await transcriber.isModelInstalled() else {
+                if isDictation {
+                    isPTTArming = false
+                    stopPTTAfterStart = false
+                }
                 status = .error("No transcription model is installed. Open Settings > Model and download the English model.")
                 return
             }
 
             currentMode = mode
             try await recorder.startRecording(captureSystemAudio: mode == .markdown)
-            isRecording = true
-            status = .recording
-            recordingStartedAt = Date()
-            playSound("Blow")  // start cue
-            if mode == .paste { RecordingIndicatorWindow.shared.show(recorder: recorder) }
+            if mode == .markdown {
+                isRecording = true
+                status = .recording
+                recordingStartedAt = Date()
+                playSound("Blow")
+            } else {
+                RecordingIndicatorWindow.shared.show(recorder: recorder)
+                if stopPTTAfterStart {
+                    stopPTTAfterStart = false
+                    await stopRecording()
+                    return
+                }
+            }
         } catch {
+            if isDictation {
+                isPTTArming = false
+                stopPTTAfterStart = false
+            }
             status = .error(error.localizedDescription)
         }
     }
@@ -201,14 +251,21 @@ class AppState: ObservableObject {
     func stopRecording() async {
         let startedAt = recordingStartedAt ?? Date()
         let mode = currentMode
+        isPTTArming = false
+        stopPTTAfterStart = false
         isRecording = false
-        status = .transcribing
         RecordingIndicatorWindow.shared.hide()
 
         do {
-            let wavURL = try await recorder.stopRecording()
-            print("WAV saved: \(wavURL.path)")
+            let recording = try await recorder.stopRecording()
+            let wavURL = recording.wavURL
+            print(
+                "WAV saved: \(wavURL.path) " +
+                "[captured=\(recording.capturedSampleCount16k) written=\(recording.writtenSampleCount16k) " +
+                "padded=\(recording.wasPaddedForASR) bluetooth=\(recording.isBluetoothInput)]"
+            )
 
+            status = .transcribing
             let audioSource: AudioSource = mode == .paste ? .microphone : .system
             let rawTranscript = try await transcriber.transcribe(wavURL: wavURL, source: audioSource)
             print("Transcript ready (\(rawTranscript.count) chars)")
@@ -218,8 +275,8 @@ class AppState: ObservableObject {
 
             case .paste:
                 status = .ready
-                playSound("Bottle")
                 if !suppressPaste { copyAndPaste(rawTranscript) }
+                playSound("Bottle")
                 try? FileManager.default.removeItem(at: wavURL)
 
             case .markdown:
@@ -248,6 +305,8 @@ class AppState: ObservableObject {
                 NSWorkspace.shared.selectFile(mdURL.path, inFileViewerRootedAtPath: "")
             }
 
+        } catch RecorderError.noAudioCaptured where mode == .paste {
+            status = .ready
         } catch {
             isRecording = false
             status = .error(error.localizedDescription)
@@ -257,8 +316,12 @@ class AppState: ObservableObject {
 
     // MARK: - Sound
 
-    private func playSound(_ name: String) {
-        NSSound(named: name)?.play()
+    @discardableResult
+    private func playSound(_ name: String) -> TimeInterval {
+        guard let sound = NSSound(named: name) else { return 0 }
+        let duration = sound.duration
+        sound.play()
+        return duration
     }
 
     // MARK: - Clipboard + paste
