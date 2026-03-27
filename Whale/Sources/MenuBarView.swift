@@ -47,6 +47,10 @@ struct MenuBarView: View {
         }
         .keyboardShortcut(",", modifiers: .command)
 
+        Button("View Log") {
+            DiagnosticLog.openInFinder()
+        }
+
         Button("Quit") {
             NSApplication.shared.terminate(nil)
         }

@@ -391,13 +391,16 @@ class AppState: ObservableObject {
         let bundle = snapshot?.bundleIdentifier ?? "unknown"
         let role = snapshot?.role ?? "nil"
         let subrole = snapshot?.subrole ?? "nil"
+        let roleDesc = snapshot?.roleDescription ?? "nil"
         let editable = snapshot?.isEditable ?? false
         let selectedTextRange = snapshot?.supportsSelectedTextRange ?? false
+        let hasAXValue = snapshot?.supportsAXValue ?? false
+        let attrs = snapshot?.attributeNames.joined(separator: ",") ?? "none"
         let decision = attemptedAutoPaste ? "auto-paste" : "clipboard-only"
 
-        print(
-            "AutoPaste decision=\(decision) app=\(appName) bundle=\(bundle) role=\(role) subrole=\(subrole) editable=\(editable) selectedTextRange=\(selectedTextRange)"
-        )
+        let message = "AutoPaste decision=\(decision) app=\(appName) bundle=\(bundle) role=\(role) subrole=\(subrole) roleDesc=\(roleDesc) editable=\(editable) selectedTextRange=\(selectedTextRange) hasAXValue=\(hasAXValue) attributes=[\(attrs)]"
+        print(message)
+        DiagnosticLog.log(message)
     }
 
     // MARK: - Markdown builder

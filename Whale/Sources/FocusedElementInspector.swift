@@ -6,22 +6,71 @@ struct FocusedElementSnapshot {
     let bundleIdentifier: String?
     let role: String?
     let subrole: String?
+    let roleDescription: String?
     let isEditable: Bool
     let supportsSelectedTextRange: Bool
+    let supportsAXValue: Bool
     let frame: NSRect?
+    /// AX attributes found on the focused element (for diagnostics).
+    let attributeNames: [String]
 
     private static let knownTextRoles: Set<String> = [
         "AXTextField",
         "AXTextArea",
         "AXComboBox",
         "AXSearchField",
+        "AXWebArea",
     ]
 
+    /// Bundle IDs of known Chromium-based browsers / Electron apps.
+    private static let chromiumBundlePrefixes: [String] = [
+        "com.google.Chrome",
+        "com.brave.Browser",
+        "com.microsoft.edgemac",
+        "com.operasoftware.Opera",
+        "com.vivaldi.Vivaldi",
+        "org.chromium.Chromium",
+        "com.arc.Arc",
+    ]
+
+    private var isBrowserApp: Bool {
+        guard let bundle = bundleIdentifier else { return false }
+        return Self.chromiumBundlePrefixes.contains(where: { bundle.hasPrefix($0) })
+    }
+
     var isWritableTextTarget: Bool {
+        // 1. Classic native text roles
         if let role, Self.knownTextRoles.contains(role) {
             return true
         }
-        return isEditable || supportsSelectedTextRange
+        // 2. Element reports itself as editable or supports text selection
+        if isEditable || supportsSelectedTextRange {
+            return true
+        }
+        // 3. Chromium browsers: the focused element is often an AXGroup
+        //    inside an AXWebArea. Check for text-input indicators.
+        if isBrowserApp {
+            // If the element has AXValue (holds text) or AXSelectedTextRange
+            // it is almost certainly an editable web field.
+            if supportsAXValue || supportsSelectedTextRange {
+                return true
+            }
+            // Chromium may report role=AXGroup, subrole=nil for
+            // contenteditable divs. When we're in a known browser and the
+            // element has a role description containing "text" or "edit"
+            // that's enough to trust it.
+            if let rd = roleDescription?.lowercased(),
+               rd.contains("text") || rd.contains("edit") {
+                return true
+            }
+            // Final heuristic: if we're in a browser and the focused
+            // element is an AXGroup (common for contenteditable), allow it.
+            // This matches address bars and web text inputs alike.
+            if role == "AXGroup" {
+                return true
+            }
+        }
+        return false
     }
 }
 
@@ -43,8 +92,10 @@ enum FocusedElementInspector {
 
         let role = stringAttribute(kAXRoleAttribute as CFString, of: element)
         let subrole = stringAttribute(kAXSubroleAttribute as CFString, of: element)
+        let roleDescription = stringAttribute(kAXRoleDescriptionAttribute as CFString, of: element)
         let isEditable = boolAttribute("AXEditable" as CFString, of: element)
         let supportsSelectedTextRange = names.contains(kAXSelectedTextRangeAttribute as String)
+        let supportsAXValue = names.contains(kAXValueAttribute as String)
         let frame = frameAttribute(of: element)
 
         return FocusedElementSnapshot(
@@ -52,9 +103,12 @@ enum FocusedElementInspector {
             bundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
             role: role,
             subrole: subrole,
+            roleDescription: roleDescription,
             isEditable: isEditable,
             supportsSelectedTextRange: supportsSelectedTextRange,
-            frame: frame
+            supportsAXValue: supportsAXValue,
+            frame: frame,
+            attributeNames: names
         )
     }
 
