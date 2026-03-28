@@ -28,6 +28,14 @@ struct VoiceActivityDetectionStage: PipelineStage {
             return context
         }
 
+        // FluidAudio requires >= 1 s of 16 kHz audio; fall back if VAD
+        // trimmed too aggressively despite the minOutputSamples guard.
+        if stats.retainedDuration < 1.1 {
+            print("[VAD] Output too short for ASR (\(String(format: "%.1f", stats.retainedDuration))s) — using original")
+            try? FileManager.default.removeItem(at: vadURL)
+            return context
+        }
+
         print(
             "[VAD] Trimmed \(String(format: "%.1f", stats.originalDuration))s → "
             + "\(String(format: "%.1f", stats.retainedDuration))s "

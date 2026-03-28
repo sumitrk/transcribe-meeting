@@ -261,9 +261,9 @@ final class VADProcessTests: XCTestCase {
         let inputURL = tempDir.appendingPathComponent("speech.wav")
         let outputURL = tempDir.appendingPathComponent("speech-vad.wav")
 
-        let samples = silence(seconds: 1.0)
-            + noisyTone(seconds: 1.0, amplitude: 0.5)
-            + silence(seconds: 1.0)
+        let samples = silence(seconds: 1.5)
+            + noisyTone(seconds: 2.0, amplitude: 0.5)
+            + silence(seconds: 1.5)
         try VoiceActivityEditor.writeSamples(samples, to: inputURL)
         let stats = try VoiceActivityEditor.processWAV(inputURL: inputURL, outputURL: outputURL)
 
@@ -288,7 +288,7 @@ final class VADPipelineIntegrationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
         let inputURL = tempDir.appendingPathComponent("test.wav")
-        let samples = silence(seconds: 0.5) + tone(seconds: 1.0) + silence(seconds: 0.5)
+        let samples = silence(seconds: 1.0) + tone(seconds: 2.0) + silence(seconds: 1.0)
         try VoiceActivityEditor.writeSamples(samples, to: inputURL)
 
         let wavCapture = WAVCapturingStage()
@@ -321,7 +321,7 @@ final class VADPipelineIntegrationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
         let inputURL = tempDir.appendingPathComponent("test.wav")
-        let samples = silence(seconds: 0.5) + tone(seconds: 1.0) + silence(seconds: 0.5)
+        let samples = silence(seconds: 1.0) + tone(seconds: 2.0) + silence(seconds: 1.0)
         try VoiceActivityEditor.writeSamples(samples, to: inputURL)
 
         let wavCapture = WAVCapturingStage()

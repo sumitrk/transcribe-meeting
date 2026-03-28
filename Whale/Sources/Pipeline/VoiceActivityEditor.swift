@@ -31,7 +31,7 @@ enum VADPolicy {
     static let postRollSamples: Int = 2_880  // 180 ms
     static let collapseThresholdSamples: Int = 9_600  // 600 ms
     static let spacerSamples: Int = 2_400    // 150 ms spacer replaces long gaps
-    static let minOutputSamples: Int = 4_000 // 250 ms — below this, skip VAD
+    static let minOutputSamples: Int = 16_800 // ~1.05 s — FluidAudio requires >= 1 s of 16 kHz audio
     static let absoluteFloorDBFS: Float = -45.0
     static let noiseMarginDB: Float = 10.0
 }
