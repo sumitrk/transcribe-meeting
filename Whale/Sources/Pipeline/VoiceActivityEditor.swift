@@ -25,15 +25,16 @@ enum VADPolicy {
     static let sampleRate: Double = 16_000
     static let frameSamples: Int = 320       // 20 ms at 16 kHz
     static let hopSamples: Int = 160         // 10 ms hop
-    static let minSpeechSamples: Int = 2_400 // 150 ms
-    static let mergeGapSamples: Int = 12_800 // 800 ms — dictation pauses can easily be 500ms+
+    static let minSpeechSamples: Int = 1_600 // 100 ms
+    static let splitSilenceSamples: Int = 7_200 // 450 ms of silence ends a speech span
+    static let mergeGapSamples: Int = 2_400 // 150 ms — only stitch threshold chatter
     static let preRollSamples: Int = 1_920   // 120 ms
     static let postRollSamples: Int = 2_880  // 180 ms
     static let collapseThresholdSamples: Int = 24_000 // 1500 ms — only collapse truly long dead air
     static let spacerSamples: Int = 3_200    // 200 ms spacer replaces long gaps
     static let minOutputSamples: Int = 16_800 // ~1.05 s — FluidAudio requires >= 1 s of 16 kHz audio
-    static let absoluteFloorDBFS: Float = -45.0
-    static let noiseFloorCapDBFS: Float = -40.0 // cap so speech-heavy starts don't inflate the threshold
+    static let absoluteFloorDBFS: Float = -48.0
+    static let noiseFloorCapDBFS: Float = -48.0 // keep speech-heavy starts from inflating the threshold
     static let noiseMarginDB: Float = 6.0    // margin above noise floor to set speech threshold
 }
 
@@ -75,31 +76,46 @@ enum VoiceActivityEditor {
 
         var rawSpans: [SpeechSpan] = []
         var speechStart: Int?
+        var lastSpeechSample: Int?
+        var silenceRunSamples = 0
         var frameStart = 0
 
         while frameStart + VADPolicy.frameSamples <= count {
             let energy = frameRMS(samples, offset: frameStart, length: VADPolicy.frameSamples)
             let isSpeech = energy >= thresholdLinear
+            let frameEnd = min(count, frameStart + VADPolicy.frameSamples)
 
             if isSpeech && speechStart == nil {
                 speechStart = frameStart
-            } else if !isSpeech, let start = speechStart {
-                rawSpans.append(SpeechSpan(startSample: start, endSample: frameStart))
-                speechStart = nil
+            }
+
+            if isSpeech {
+                lastSpeechSample = frameEnd
+                silenceRunSamples = 0
+            } else if let start = speechStart {
+                silenceRunSamples += VADPolicy.hopSamples
+                if silenceRunSamples >= VADPolicy.splitSilenceSamples {
+                    rawSpans.append(
+                        SpeechSpan(startSample: start, endSample: lastSpeechSample ?? frameStart)
+                    )
+                    speechStart = nil
+                    lastSpeechSample = nil
+                    silenceRunSamples = 0
+                }
             }
             frameStart += VADPolicy.hopSamples
         }
 
         if let start = speechStart {
-            rawSpans.append(SpeechSpan(startSample: start, endSample: count))
+            rawSpans.append(SpeechSpan(startSample: start, endSample: lastSpeechSample ?? count))
         }
 
-        let filtered = rawSpans.filter { $0.sampleCount >= VADPolicy.minSpeechSamples }
-        let merged = mergeCloseSpans(filtered, maxGap: VADPolicy.mergeGapSamples)
+        let merged = mergeCloseSpans(rawSpans, maxGap: VADPolicy.mergeGapSamples)
+        let filtered = merged.filter { $0.sampleCount >= VADPolicy.minSpeechSamples }
 
-        print("[VAD] \(rawSpans.count) raw spans → \(filtered.count) after min-length → \(merged.count) after merge")
+        print("[VAD] \(rawSpans.count) raw spans → \(merged.count) after merge → \(filtered.count) after min-length")
 
-        return merged
+        return filtered
     }
 
     /// Rebuilds a waveform from detected speech spans, collapsing long internal
@@ -265,9 +281,7 @@ enum VoiceActivityEditor {
         while frameIdx < totalFrames {
             let offset = frameIdx * VADPolicy.frameSamples
             let rms = frameRMS(samples, offset: offset, length: VADPolicy.frameSamples)
-            if rms > 0 {
-                energies.append(linearToDBFS(rms))
-            }
+            energies.append(linearToDBFS(rms))
             frameIdx += step
         }
 

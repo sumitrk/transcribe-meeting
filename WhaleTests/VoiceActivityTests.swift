@@ -38,21 +38,21 @@ final class SpeechSpanDetectionTests: XCTestCase {
         XCTAssertLessThanOrEqual(span.endSample, speechEnd + VADPolicy.frameSamples)
     }
 
-    func testShortPausesArePreservedBySpanMerge() {
-        // Two speech segments separated by 500ms gap (< 800ms merge threshold)
+    func testShortPausesStayInsideSingleSpeechSpan() {
+        // Two speech segments separated by 300ms gap (< 450ms split threshold)
         let samples = silence(seconds: 0.2)
             + tone(seconds: 0.3)
-            + silence(seconds: 0.5) // short gap — should merge
+            + silence(seconds: 0.3) // short gap — should stay inside one span
             + tone(seconds: 0.3)
             + silence(seconds: 0.2)
 
         let spans = VoiceActivityEditor.detectSpeechSpans(in: samples)
 
-        XCTAssertEqual(spans.count, 1, "Short gap should cause spans to merge into one")
+        XCTAssertEqual(spans.count, 1, "Short gap should stay inside one speech span")
     }
 
     func testLongPauseCreatesSeparateSpans() {
-        // Two speech segments separated by 1.2s gap (> 800ms merge threshold)
+        // Two speech segments separated by 1.2s gap (> 450ms split threshold)
         let samples = silence(seconds: 0.1)
             + tone(seconds: 0.3)
             + silence(seconds: 1.2) // long gap — should NOT merge
@@ -72,7 +72,7 @@ final class SpeechSpanDetectionTests: XCTestCase {
     }
 
     func testVeryShortUtteranceBelowMinSpeechSpanIsDropped() {
-        // 50ms tone is below the 150ms minimum speech span
+        // 50ms tone is below the 100ms minimum speech span
         let samples = silence(seconds: 0.5) + tone(seconds: 0.05) + silence(seconds: 0.5)
         let spans = VoiceActivityEditor.detectSpeechSpans(in: samples)
 
@@ -80,11 +80,33 @@ final class SpeechSpanDetectionTests: XCTestCase {
     }
 
     func testUtteranceAtMinSpeechSpanSurvives() {
-        // 200ms tone should survive the 150ms minimum threshold
+        // 200ms tone should survive the 100ms minimum threshold
         let samples = silence(seconds: 0.3) + tone(seconds: 0.2) + silence(seconds: 0.3)
         let spans = VoiceActivityEditor.detectSpeechSpans(in: samples)
 
-        XCTAssertEqual(spans.count, 1, "200ms utterance should survive 150ms minimum")
+        XCTAssertEqual(spans.count, 1, "200ms utterance should survive 100ms minimum")
+    }
+
+    func testLeadingSilenceStillDetectsLaterSoftSpeech() {
+        let samples = silence(seconds: 1.5)
+            + tone(seconds: 0.35, amplitude: 0.015)
+            + silence(seconds: 0.5)
+        let spans = VoiceActivityEditor.detectSpeechSpans(in: samples)
+
+        XCTAssertEqual(spans.count, 1, "Leading silence should not prevent later speech detection")
+    }
+
+    func testSpeechWithNaturalMicroPausesStaysAsOneSpan() {
+        let samples = silence(seconds: 0.2)
+            + tone(seconds: 0.14)
+            + silence(seconds: 0.08)
+            + tone(seconds: 0.12)
+            + silence(seconds: 0.09)
+            + tone(seconds: 0.13)
+            + silence(seconds: 0.2)
+        let spans = VoiceActivityEditor.detectSpeechSpans(in: samples)
+
+        XCTAssertEqual(spans.count, 1, "Short pauses inside a phrase should not cut the utterance apart")
     }
 
     func testEmptyInputProducesNoSpans() {
@@ -163,7 +185,7 @@ final class SpanMergeTests: XCTestCase {
     func testMergeAdjacentSpans() {
         let spans = [
             SpeechSpan(startSample: 0, endSample: 1000),
-            SpeechSpan(startSample: 1100, endSample: 2000), // gap = 100 < 4000
+            SpeechSpan(startSample: 1100, endSample: 2000), // gap = 100 < 2400
         ]
 
         let merged = VoiceActivityEditor.mergeCloseSpans(spans, maxGap: VADPolicy.mergeGapSamples)
@@ -176,7 +198,7 @@ final class SpanMergeTests: XCTestCase {
     func testNoMergeForDistantSpans() {
         let spans = [
             SpeechSpan(startSample: 0, endSample: 1000),
-            SpeechSpan(startSample: 10000, endSample: 11000), // gap = 9000 > 4000
+            SpeechSpan(startSample: 10000, endSample: 11000), // gap = 9000 > 2400
         ]
 
         let merged = VoiceActivityEditor.mergeCloseSpans(spans, maxGap: VADPolicy.mergeGapSamples)
