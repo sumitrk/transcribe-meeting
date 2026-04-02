@@ -6,14 +6,14 @@
         <description>Most recent changes with links to updates.</description>
         <language>en</language>
         <item>
-            <title>Version 0.6.13</title>
-            <sparkle:version>28</sparkle:version>
-            <sparkle:shortVersionString>0.6.13</sparkle:shortVersionString>
-            <pubDate>Thu, 02 Apr 2026 10:45:20 +0000</pubDate>
+            <title>Version 0.6.14</title>
+            <sparkle:version>30</sparkle:version>
+            <sparkle:shortVersionString>0.6.14</sparkle:shortVersionString>
+            <pubDate>Thu, 02 Apr 2026 17:40:50 +0000</pubDate>
             <enclosure
-                url="https://github.com/sumitrk/whale-app/releases/download/v0.6.13/Whale.dmg"
-                sparkle:edSignature="1CLW7hfOei0PDZYwhS6Y6UXegmKA2NVIrytAwbDB3OuZibxFJdOmpBEsfGSyVCurAuN+dLnDGCRHkz40m9uYBw=="
-                length="18353187"
+                url="https://github.com/sumitrk/whale-app/releases/download/v0.6.14/Whale.dmg"
+                sparkle:edSignature="OXjWLwmI+dI8gYgUP2NiZniJrrcsFxOS8rOuJ0ya27LwDn09I8KdrFRs62w6C8JwQAF7EdOEL8TAna7F7MaWDg=="
+                length="18383210"
                 type="application/octet-stream"
             />
         </item>
