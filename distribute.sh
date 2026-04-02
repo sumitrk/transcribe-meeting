@@ -181,7 +181,7 @@ sign_dmg_for_sparkle() {
 }
 
 publish_release() {
-  local pub_date metadata_branch appcast_link
+  local pub_date metadata_branch appcast_link release_commit_message
 
   sign_dmg_for_sparkle
 
@@ -217,6 +217,19 @@ publish_release() {
 EOF
   echo "✅ appcast.xml updated"
 
+  echo ""
+  echo "▶ Publishing release metadata to ${metadata_branch}..."
+  git add appcast.xml "$VERSION_PLIST"
+  if git diff --cached --quiet; then
+    echo "❌ No release metadata changes were staged. Aborting publish."
+    exit 1
+  fi
+
+  release_commit_message="release: v${VERSION}"
+  git commit -m "$release_commit_message"
+  git push origin "$metadata_branch"
+  echo "✅ Release metadata pushed to ${metadata_branch}"
+
   if [ "$CURRENT_BRANCH" = "main" ]; then
     echo ""
     echo "▶ Creating GitHub release v${VERSION}..."
@@ -227,6 +240,7 @@ EOF
     else
       gh release create "v${VERSION}" "$DMG_NAME" \
         --repo "$GITHUB_REPO" \
+        --target "$metadata_branch" \
         --title "v${VERSION}" \
         --notes "Whale v${VERSION}" \
         2>&1 && echo "✅ GitHub release created" || echo "⚠️  Release may already exist — upload DMG manually"
@@ -236,13 +250,6 @@ EOF
     echo "▶ Skipping GitHub release on branch ${CURRENT_BRANCH}"
     echo "   Branch preview mode avoids creating repo-wide release tags/assets."
   fi
-
-  echo ""
-  echo "▶ Publishing release metadata to ${metadata_branch}..."
-  git add appcast.xml "$VERSION_PLIST"
-  git commit -m "release: v${VERSION}" || echo "(release metadata unchanged)"
-  git push origin "$metadata_branch"
-  echo "✅ Release metadata pushed to ${metadata_branch}"
 
   if [ "$CURRENT_BRANCH" != "main" ]; then
     echo "ℹ️  Branch preview appcast: ${appcast_link}"

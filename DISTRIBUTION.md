@@ -55,8 +55,8 @@ This default flow:
 - creates the DMG
 - signs the DMG for Sparkle
 - updates `appcast.xml`
-- on `main`, creates the GitHub release
 - commits and pushes release metadata to the current branch
+- on `main`, creates the GitHub release
 
 Optional post-launch integrity smoke test:
 ```bash
