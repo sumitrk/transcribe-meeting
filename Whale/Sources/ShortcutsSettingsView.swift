@@ -119,7 +119,7 @@ struct ShortcutsSettingsView: View {
         panel.prompt = "Choose"
         panel.message = "Choose the folder where transcripts will be saved."
         if panel.runModal() == .OK, let url = panel.url {
-            store.transcriptFolderPath = url.path
+            store.setTranscriptFolderURL(url)
         }
     }
 }
