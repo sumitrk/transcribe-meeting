@@ -23,6 +23,35 @@ final class TranscriptionModelTests: XCTestCase {
         XCTAssertEqual(store.selectedBuiltInModelID, .parakeetEnglishV2)
     }
 
+    func testTranscriptFolderSelectionPersistsAsResolvedURL() throws {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let store = SettingsStore(userDefaults: defaults)
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Whale-\(#function)-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        store.setTranscriptFolderURL(folder)
+
+        XCTAssertEqual(store.transcriptFolder.standardizedFileURL.path, folder.standardizedFileURL.path)
+        XCTAssertEqual(URL(fileURLWithPath: store.transcriptFolderPath).standardizedFileURL.path, folder.standardizedFileURL.path)
+    }
+
+    func testLocalModelFolderSelectionPersistsAsResolvedURL() throws {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let store = SettingsStore(userDefaults: defaults)
+        let folder = try makeTemporaryWhisperModelFolder(function: #function)
+
+        store.setLocalModelURL(folder, for: .whisperLocalFolder)
+
+        XCTAssertEqual(store.localModelURL(for: .whisperLocalFolder)?.standardizedFileURL.path, folder.standardizedFileURL.path)
+        XCTAssertEqual(
+            store.localModelPath(for: .whisperLocalFolder).map { URL(fileURLWithPath: $0).standardizedFileURL.path },
+            folder.standardizedFileURL.path
+        )
+    }
+
     func testCatalogGroupsContainExpectedBuiltInModels() {
         XCTAssertEqual(BuiltInModelGroup.allCases, [.parakeet, .whisper])
         XCTAssertEqual(BuiltInModelCatalog.models(in: .parakeet).map(\.id), [.parakeetEnglishV2])

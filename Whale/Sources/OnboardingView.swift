@@ -356,7 +356,7 @@ private struct TryItStep: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Optional AI cleanup")
                                 .fontWeight(.semibold)
-                            Text("Light cleanup works immediately. Medium cleanup needs the Qwen local AI model installed from Settings.")
+                            Text("AI cleanup needs the Qwen local AI model installed from Settings.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -402,7 +402,7 @@ private struct TryItStep: View {
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
         if panel.runModal() == .OK, let url = panel.url {
-            store.transcriptFolderPath = url.path
+            store.setTranscriptFolderURL(url)
         }
     }
 }

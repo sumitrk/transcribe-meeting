@@ -40,8 +40,16 @@ class SettingsStore: ObservableObject {
         didSet { ud.set(transcriptFolderPath, forKey: Keys.transcriptFolder) }
     }
 
+    @Published private var transcriptFolderBookmark: String {
+        didSet { ud.set(transcriptFolderBookmark, forKey: Keys.transcriptFolderBookmark) }
+    }
+
     var transcriptFolder: URL {
-        transcriptFolderPath.isEmpty
+        if let url = resolveTranscriptFolderURL(startAccessing: true) {
+            return url
+        }
+
+        return transcriptFolderPath.isEmpty
             ? AudioRecorder.meetingsFolder()
             : URL(fileURLWithPath: transcriptFolderPath)
     }
@@ -75,6 +83,10 @@ class SettingsStore: ObservableObject {
         didSet { ud.set(builtInModelLocalPaths, forKey: Keys.builtInModelLocalPaths) }
     }
 
+    @Published private var builtInModelLocalBookmarks: [String: String] {
+        didSet { ud.set(builtInModelLocalBookmarks, forKey: Keys.builtInModelLocalBookmarks) }
+    }
+
     // MARK: - Post-Processing
 
     @Published var postProcessingEnabled: Bool {
@@ -89,15 +101,22 @@ class SettingsStore: ObservableObject {
         didSet { ud.set(selectedLocalLLMModelID?.rawValue, forKey: Keys.selectedLocalLLMModelID) }
     }
 
+    @Published var cleanupPromptOverride: String {
+        didSet { ud.set(cleanupPromptOverride, forKey: Keys.cleanupPromptOverride) }
+    }
+
     // MARK: - Init
 
     private let ud: UserDefaults
+    private var activeTranscriptFolderURL: URL?
+    private var activeSecurityScopedModelURLs: [String: URL] = [:]
 
     private static let defaultModifiers = Int(NSEvent.ModifierFlags([.command, .shift]).rawValue)
 
     init(userDefaults: UserDefaults = .standard) {
         ud = userDefaults
         transcriptFolderPath     = ud.string(forKey: Keys.transcriptFolder) ?? ""
+        transcriptFolderBookmark = ud.string(forKey: Keys.transcriptFolderBookmark) ?? ""
         hasCompletedOnboarding   = ud.bool(forKey: Keys.hasCompletedOnboarding)
         launchAtLogin            = ud.bool(forKey: Keys.launchAtLogin)
         toggleKeyCode            = (ud.object(forKey: Keys.toggleKeyCode) as? Int) ?? 17
@@ -108,21 +127,42 @@ class SettingsStore: ObservableObject {
             rawValue: ud.string(forKey: Keys.selectedBuiltInModelID) ?? ""
         ) ?? .parakeetEnglishV2
         builtInModelLocalPaths   = ud.dictionary(forKey: Keys.builtInModelLocalPaths) as? [String: String] ?? [:]
+        builtInModelLocalBookmarks = ud.dictionary(forKey: Keys.builtInModelLocalBookmarks) as? [String: String] ?? [:]
         postProcessingEnabled    = ud.object(forKey: Keys.postProcessingEnabled) as? Bool ?? true
-        cleanupLevel             = CleanupLevel(
-            rawValue: ud.string(forKey: Keys.cleanupLevel) ?? ""
-        ) ?? .light
+        cleanupLevel             = .medium
         selectedLocalLLMModelID  = LocalLLMModelID(
             rawValue: ud.string(forKey: Keys.selectedLocalLLMModelID) ?? ""
         ) ?? .qwen3_0_6b_4bit
+        cleanupPromptOverride    = ud.string(forKey: Keys.cleanupPromptOverride) ?? ""
+    }
+
+    func setTranscriptFolderURL(_ url: URL?) {
+        stopAccessingTranscriptFolder()
+        transcriptFolderPath = url?.path ?? ""
+        transcriptFolderBookmark = makeBookmarkString(for: url) ?? ""
     }
 
     func localModelPath(for modelID: BuiltInModelID) -> String? {
-        builtInModelLocalPaths[modelID.rawValue]
+        if let url = resolveLocalModelURL(for: modelID, startAccessing: false) {
+            return url.path
+        }
+        return builtInModelLocalPaths[modelID.rawValue]
     }
 
     func setLocalModelPath(_ path: String?, for modelID: BuiltInModelID) {
+        stopAccessingLocalModel(for: modelID)
         builtInModelLocalPaths[modelID.rawValue] = path
+        builtInModelLocalBookmarks[modelID.rawValue] = nil
+    }
+
+    func localModelURL(for modelID: BuiltInModelID) -> URL? {
+        resolveLocalModelURL(for: modelID, startAccessing: true)
+    }
+
+    func setLocalModelURL(_ url: URL?, for modelID: BuiltInModelID) {
+        stopAccessingLocalModel(for: modelID)
+        builtInModelLocalPaths[modelID.rawValue] = url?.path
+        builtInModelLocalBookmarks[modelID.rawValue] = makeBookmarkString(for: url)
     }
 
     // MARK: - Key name helper
@@ -153,8 +193,92 @@ class SettingsStore: ObservableObject {
         return map[code] ?? "?"
     }
 
+    private func resolveTranscriptFolderURL(startAccessing: Bool) -> URL? {
+        if startAccessing, let activeTranscriptFolderURL {
+            return activeTranscriptFolderURL
+        }
+
+        guard !transcriptFolderBookmark.isEmpty else { return nil }
+        let resolved = resolveBookmark(transcriptFolderBookmark, startAccessing: startAccessing)
+
+        if startAccessing {
+            activeTranscriptFolderURL = resolved.activeURL
+        }
+
+        return resolved.url
+    }
+
+    private func resolveLocalModelURL(for modelID: BuiltInModelID, startAccessing: Bool) -> URL? {
+        let key = modelID.rawValue
+        if startAccessing, let activeURL = activeSecurityScopedModelURLs[key] {
+            return activeURL
+        }
+
+        guard let bookmark = builtInModelLocalBookmarks[key], !bookmark.isEmpty else { return nil }
+        let resolved = resolveBookmark(bookmark, startAccessing: startAccessing)
+
+        if startAccessing, let activeURL = resolved.activeURL {
+            activeSecurityScopedModelURLs[key] = activeURL
+        }
+
+        return resolved.url
+    }
+
+    private func stopAccessingTranscriptFolder() {
+        activeTranscriptFolderURL?.stopAccessingSecurityScopedResource()
+        activeTranscriptFolderURL = nil
+    }
+
+    private func stopAccessingLocalModel(for modelID: BuiltInModelID) {
+        activeSecurityScopedModelURLs.removeValue(forKey: modelID.rawValue)?
+            .stopAccessingSecurityScopedResource()
+    }
+
+    private func makeBookmarkString(for url: URL?) -> String? {
+        guard let url else { return nil }
+
+        if let data = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
+            return data.base64EncodedString()
+        }
+
+        if let data = try? url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil) {
+            return data.base64EncodedString()
+        }
+
+        return nil
+    }
+
+    private func resolveBookmark(_ bookmark: String, startAccessing: Bool) -> (url: URL?, activeURL: URL?) {
+        guard let data = Data(base64Encoded: bookmark) else {
+            return (nil, nil)
+        }
+
+        var isStale = false
+        if let url = try? URL(
+            resolvingBookmarkData: data,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) {
+            let didStartAccess = startAccessing ? url.startAccessingSecurityScopedResource() : false
+            return (url, didStartAccess ? url : nil)
+        }
+
+        if let url = try? URL(
+            resolvingBookmarkData: data,
+            options: [],
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) {
+            return (url, nil)
+        }
+
+        return (nil, nil)
+    }
+
     private enum Keys {
         static let transcriptFolder      = "transcriptFolderPath"
+        static let transcriptFolderBookmark = "transcriptFolderBookmark"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let launchAtLogin         = "launchAtLogin"
         static let toggleKeyCode         = "toggleKeyCode"
@@ -163,8 +287,10 @@ class SettingsStore: ObservableObject {
         static let pttModifiers          = "pttModifiers"
         static let selectedBuiltInModelID = "selectedBuiltInModelID"
         static let builtInModelLocalPaths = "builtInModelLocalPaths"
+        static let builtInModelLocalBookmarks = "builtInModelLocalBookmarks"
         static let postProcessingEnabled = "postProcessingEnabled"
         static let cleanupLevel = "cleanupLevel"
         static let selectedLocalLLMModelID = "selectedLocalLLMModelID"
+        static let cleanupPromptOverride = "cleanupPromptOverride"
     }
 }

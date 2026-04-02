@@ -518,13 +518,13 @@ actor WhisperTranscriptionBackend: BuiltInTranscriptionBackend {
             throw LocalTranscriptionError.unsupportedModel(modelID)
         }
 
-        guard let modelPath = await persistedModelPath(for: modelID) else {
+        guard let modelURL = await persistedModelURL(for: modelID) else {
             return false
         }
 
         _ = try Self.validateStoredModelFolder(
             for: modelID,
-            modelPath: modelPath
+            modelURL: modelURL
         )
         return true
     }
@@ -552,7 +552,7 @@ actor WhisperTranscriptionBackend: BuiltInTranscriptionBackend {
 
         await persistModelPath(modelFolder.path, for: modelID)
         progressHandler?(ModelInstallProgress(fractionCompleted: 1.0, phase: "Loading model…"))
-        let validation = try Self.validateStoredModelFolder(for: modelID, modelPath: modelFolder.path)
+        let validation = try Self.validateStoredModelFolder(for: modelID, modelURL: modelFolder)
         _ = try await prepareWhisperKit(
             runtime: Self.runtimeConfiguration(for: modelID, validation: validation),
             forceReload: true
@@ -573,7 +573,7 @@ actor WhisperTranscriptionBackend: BuiltInTranscriptionBackend {
             folderURL,
             descriptor: modelID.descriptor
         )
-        await persistModelPath(validation.modelFolder.path, for: modelID)
+        await persistLocalModelURL(validation.modelFolder, for: modelID)
         progressHandler?(ModelInstallProgress(fractionCompleted: 1.0, phase: "Loading model…"))
         _ = try await prepareWhisperKit(
             runtime: Self.runtimeConfiguration(for: modelID, validation: validation),
@@ -599,11 +599,11 @@ actor WhisperTranscriptionBackend: BuiltInTranscriptionBackend {
     }
 
     private func ensureReady(modelID: BuiltInModelID) async throws -> WhisperKit {
-        guard let modelPath = await persistedModelPath(for: modelID) else {
+        guard let modelURL = await persistedModelURL(for: modelID) else {
             throw LocalTranscriptionError.modelNotInstalled(modelID.descriptor)
         }
 
-        let validation = try Self.validateStoredModelFolder(for: modelID, modelPath: modelPath)
+        let validation = try Self.validateStoredModelFolder(for: modelID, modelURL: modelURL)
         return try await prepareWhisperKit(
             runtime: Self.runtimeConfiguration(for: modelID, validation: validation)
         )
@@ -635,9 +635,17 @@ actor WhisperTranscriptionBackend: BuiltInTranscriptionBackend {
         return whisperKit
     }
 
-    private func persistedModelPath(for modelID: BuiltInModelID) async -> String? {
+    private func persistedModelURL(for modelID: BuiltInModelID) async -> URL? {
         await MainActor.run {
-            SettingsStore.shared.localModelPath(for: modelID)
+            switch modelID {
+            case .whisperLocalFolder:
+                return SettingsStore.shared.localModelURL(for: modelID)
+            default:
+                guard let path = SettingsStore.shared.localModelPath(for: modelID) else {
+                    return nil
+                }
+                return URL(fileURLWithPath: path, isDirectory: true)
+            }
         }
     }
 
@@ -647,17 +655,21 @@ actor WhisperTranscriptionBackend: BuiltInTranscriptionBackend {
         }
     }
 
+    private func persistLocalModelURL(_ url: URL?, for modelID: BuiltInModelID) async {
+        await MainActor.run {
+            SettingsStore.shared.setLocalModelURL(url, for: modelID)
+        }
+    }
+
     private static func validateStoredModelFolder(
         for modelID: BuiltInModelID,
-        modelPath: String
+        modelURL: URL
     ) throws -> WhisperModelValidationResult {
-        let folder = URL(fileURLWithPath: modelPath, isDirectory: true)
-
         switch modelID {
         case .whisperLargeV3Turbo:
-            return try validateModelFolder(at: folder, descriptor: modelID.descriptor)
+            return try validateModelFolder(at: modelURL, descriptor: modelID.descriptor)
         case .whisperLocalFolder:
-            return try validateModelFolder(at: folder, descriptor: modelID.descriptor)
+            return try validateModelFolder(at: modelURL, descriptor: modelID.descriptor)
         default:
             throw LocalTranscriptionError.unsupportedModel(modelID)
         }
