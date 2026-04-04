@@ -509,6 +509,8 @@ class AppState: ObservableObject {
     // MARK: - Startup
 
     private func prepareApp() async {
+        AppRuntimeInfo.migrateSandboxDataIfNeeded()
+
         if AppRuntimeInfo.current.shouldResetParakeetCacheOnLaunch {
             do {
                 try await transcriber.resetModel(.parakeetEnglishV2)

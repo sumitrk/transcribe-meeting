@@ -124,23 +124,36 @@ struct FocusedElementSnapshot {
 }
 
 enum FocusedElementInspector {
+    private struct FocusResolution {
+        let element: AXUIElement
+        let path: String
+    }
+
     static func snapshot() -> FocusedElementSnapshot? {
         focusedElementContext()?.snapshot
     }
 
     static func focusedElementContext() -> FocusedElementContext? {
-        guard AXIsProcessTrusted() else { return nil }
+        guard AXIsProcessTrusted() else {
+            DiagnosticLog.log("[Focus] AXIsProcessTrusted returned false.")
+            return nil
+        }
 
+        let frontmostApp = NSWorkspace.shared.frontmostApplication
+        let appName = frontmostApp?.localizedName ?? "unknown"
+        let bundleIdentifier = frontmostApp?.bundleIdentifier ?? "unknown"
         let system = AXUIElementCreateSystemWide()
-        var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            system,
-            kAXFocusedUIElementAttribute as CFString,
-            &focusedRef
-        ) == .success,
-              let focusedRef else { return nil }
 
-        let element = focusedRef as! AXUIElement
+        guard let resolution = resolveFocusedElement(
+            system: system,
+            frontmostPID: frontmostApp?.processIdentifier,
+            appName: appName,
+            bundleIdentifier: bundleIdentifier
+        ) else {
+            return nil
+        }
+
+        let element = resolution.element
         let names = attributeNames(for: element)
 
         let role = stringAttribute(kAXRoleAttribute as CFString, of: element)
@@ -160,8 +173,8 @@ enum FocusedElementInspector {
         let frame = frameAttribute(of: element)
 
         let snapshot = FocusedElementSnapshot(
-            appName: NSWorkspace.shared.frontmostApplication?.localizedName,
-            bundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+            appName: appName,
+            bundleIdentifier: bundleIdentifier,
             role: role,
             subrole: subrole,
             roleDescription: roleDescription,
@@ -184,6 +197,101 @@ enum FocusedElementInspector {
             placeholderValue: placeholderValue,
             numberOfCharacters: numberOfCharacters
         )
+    }
+
+    private static func resolveFocusedElement(
+        system: AXUIElement,
+        frontmostPID: pid_t?,
+        appName: String,
+        bundleIdentifier: String
+    ) -> FocusResolution? {
+        var attempts: [String] = []
+
+        if let frontmostPID,
+           let element = focusedElement(
+                from: AXUIElementCreateApplication(frontmostPID),
+                label: "frontmostApp(pid=\(frontmostPID))",
+                attempts: &attempts
+           ) {
+            DiagnosticLog.log("[Focus] Resolved focused element via frontmost app lookup for \(appName) (\(bundleIdentifier)).")
+            return FocusResolution(element: element, path: "frontmostApp")
+        }
+
+        var focusedAppRef: CFTypeRef?
+        let focusedAppError = copyAttributeValueWithRetries(
+            from: system,
+            attribute: kAXFocusedApplicationAttribute as CFString,
+            value: &focusedAppRef
+        )
+        if focusedAppError == .success, let focusedAppRef {
+            let appElement = focusedAppRef as! AXUIElement
+            if let element = focusedElement(
+                from: appElement,
+                label: "systemFocusedApplication",
+                attempts: &attempts
+            ) {
+                DiagnosticLog.log("[Focus] Resolved focused element via system focused application for \(appName) (\(bundleIdentifier)).")
+                return FocusResolution(element: element, path: "systemFocusedApplication")
+            }
+        } else {
+            attempts.append("systemFocusedApplication=\(focusedAppError.rawValue)")
+        }
+
+        if let element = focusedElement(
+            from: system,
+            label: "systemWide",
+            attempts: &attempts
+        ) {
+            DiagnosticLog.log("[Focus] Resolved focused element via system-wide lookup for \(appName) (\(bundleIdentifier)).")
+            return FocusResolution(element: element, path: "systemWide")
+        }
+
+        DiagnosticLog.log(
+            "[Focus] Failed to resolve focused UI element for \(appName) (\(bundleIdentifier)). attempts=\(attempts.joined(separator: " | "))"
+        )
+        return nil
+    }
+
+    private static func focusedElement(
+        from source: AXUIElement,
+        label: String,
+        attempts: inout [String]
+    ) -> AXUIElement? {
+        var focusedRef: CFTypeRef?
+        let error = copyAttributeValueWithRetries(
+            from: source,
+            attribute: kAXFocusedUIElementAttribute as CFString,
+            value: &focusedRef
+        )
+        guard error == .success, let focusedRef else {
+            attempts.append("\(label)=\(error.rawValue)")
+            return nil
+        }
+        return focusedRef as! AXUIElement
+    }
+
+    @discardableResult
+    private static func copyAttributeValueWithRetries(
+        from source: AXUIElement,
+        attribute: CFString,
+        value: inout CFTypeRef?
+    ) -> AXError {
+        let retryDelays: [useconds_t] = [0, 20_000, 80_000]
+        var lastError: AXError = .failure
+
+        for delay in retryDelays {
+            if delay > 0 {
+                usleep(delay)
+            }
+
+            value = nil
+            lastError = AXUIElementCopyAttributeValue(source, attribute, &value)
+            if lastError == .success || lastError != .cannotComplete {
+                return lastError
+            }
+        }
+
+        return lastError
     }
 
     private static func attributeNames(for element: AXUIElement) -> [String] {

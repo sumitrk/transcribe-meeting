@@ -6,6 +6,17 @@ enum InsertionStrategy: Equatable {
     case directAX
     case simulatedPaste
     case copyOnly(RecordingIndicatorWindow.PasteHintReason)
+
+    var diagnosticName: String {
+        switch self {
+        case .directAX:
+            return "directAX"
+        case .simulatedPaste:
+            return "simulatedPaste"
+        case .copyOnly(let reason):
+            return "copyOnly(\(reason.diagnosticName))"
+        }
+    }
 }
 
 /// Result of probing `AXStringForRange({0,1})` to verify whether a non-empty
@@ -85,13 +96,14 @@ enum TextInsertionManager {
 
     static func insertionStrategy(
         for snapshot: FocusedElementSnapshot?,
-        isAccessibilityTrusted: Bool = AXIsProcessTrusted()
+        isAccessibilityTrusted: Bool = AXIsProcessTrusted(),
+        canPostEvents: Bool = CGPreflightPostEventAccess()
     ) -> InsertionStrategy {
-        guard isAccessibilityTrusted else {
+        guard isAccessibilityTrusted || canPostEvents else {
             return .copyOnly(.accessibilityMissing)
         }
         guard let snapshot else {
-            return .copyOnly(.manualPasteOnly)
+            return canPostEvents ? .simulatedPaste : .copyOnly(.manualPasteOnly)
         }
         if snapshot.canDirectInsertSafely {
             return .directAX
@@ -169,17 +181,28 @@ enum TextInsertionManager {
     static func insertOrCopy(_ text: String) {
         let focusedElement = FocusedElementInspector.focusedElementContext()
         let snapshot = focusedElement?.snapshot
-        let strategy = insertionStrategy(for: snapshot)
+        let canPostEvents = CGPreflightPostEventAccess()
+        let strategy = insertionStrategy(
+            for: snapshot,
+            isAccessibilityTrusted: AXIsProcessTrusted(),
+            canPostEvents: canPostEvents
+        )
+        DiagnosticLog.log(
+            "[Paste] strategy=\(strategy.diagnosticName) textLength=\(text.count) trusted=\(AXIsProcessTrusted()) " +
+            "canPostEvents=\(canPostEvents) target=\(diagnosticDescription(for: snapshot))"
+        )
 
         switch strategy {
         case .directAX:
             guard let focusedElement else {
                 copyToClipboard(text)
+                DiagnosticLog.log("[Paste] Falling back to copyOnly because focused element context disappeared before DirectAX insertion.")
                 RecordingIndicatorWindow.shared.showHint(reason: .manualPasteOnly)
                 return
             }
             do {
                 try insertViaDirectAX(text, into: focusedElement)
+                DiagnosticLog.log("[Paste] Inserted transcript via DirectAX.")
             } catch {
                 let message = "DirectAX insertion failed: \(error.localizedDescription). Falling back to simulated paste."
                 print(message)
@@ -187,11 +210,26 @@ enum TextInsertionManager {
                 simulatedPastePreservingClipboard(text)
             }
         case .simulatedPaste:
+            DiagnosticLog.log("[Paste] Using simulated Command-V paste.")
             simulatedPastePreservingClipboard(text)
         case .copyOnly(let reason):
             copyToClipboard(text)
+            DiagnosticLog.log("[Paste] Copied transcript without auto-paste. reason=\(reason.diagnosticName)")
             RecordingIndicatorWindow.shared.showHint(reason: reason)
         }
+    }
+
+    private static func diagnosticDescription(for snapshot: FocusedElementSnapshot?) -> String {
+        guard let snapshot else { return "none" }
+        let appName = snapshot.appName ?? "unknown"
+        let bundleID = snapshot.bundleIdentifier ?? "unknown"
+        let role = snapshot.role ?? "nil"
+        let subrole = snapshot.subrole ?? "nil"
+        let blockers = snapshot.directInsertBlockers.isEmpty
+            ? "none"
+            : snapshot.directInsertBlockers.joined(separator: ",")
+        return "app=\(appName) bundle=\(bundleID) role=\(role) subrole=\(subrole) " +
+            "writable=\(snapshot.isWritableTextTarget) direct=\(snapshot.canDirectInsertSafely) blockers=\(blockers)"
     }
 
     private static func insertViaDirectAX(_ text: String, into context: FocusedElementContext) throws {
